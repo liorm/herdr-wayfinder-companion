@@ -8,6 +8,9 @@ export interface Issue {
   author?: string;
   labels: string[];
   assignees: string[];
+  /** GitHub issue state. Missing `state` from `gh` is treated as open. */
+  closed: boolean;
+  body?: string;
 }
 
 export interface GhOutput {
@@ -22,7 +25,9 @@ export type IssueLoad =
   | { ok: true; repo: string; state: IssueState; issues: Issue[] }
   | { ok: false; message: string };
 
-const ISSUE_FIELDS = "number,title,labels,assignees,updatedAt,author,url";
+export const ISSUE_LIMIT = 200;
+
+const ISSUE_FIELDS = "number,title,labels,assignees,updatedAt,author,url,body,state";
 
 export function nextIssueState(state: IssueState): IssueState {
   if (state === "open") return "closed";
@@ -57,7 +62,7 @@ export async function loadIssues(
 ): Promise<IssueLoad> {
   const [repo, list] = await Promise.all([
     run(["repo", "view", "--json", "nameWithOwner"], cwd),
-    run(["issue", "list", "--state", state, "--limit", "100", "--json", ISSUE_FIELDS], cwd),
+    run(["issue", "list", "--state", state, "--limit", String(ISSUE_LIMIT), "--json", ISSUE_FIELDS], cwd),
   ]);
 
   if (repo.status !== 0) return { ok: false, message: ghFailure(repo) };
@@ -133,8 +138,16 @@ function parseIssue(value: unknown): Issue[] {
       ...(author ? { author } : {}),
       labels: namesOf(record.labels),
       assignees: loginsOf(record.assignees),
+      closed: isClosed(record),
+      ...(typeof record.body === "string" ? { body: record.body } : {}),
     },
   ];
+}
+
+function isClosed(record: Record<string, unknown>): boolean {
+  if (typeof record.closed === "boolean") return record.closed;
+  const state = typeof record.state === "string" ? record.state.toLowerCase() : "";
+  return state === "closed";
 }
 
 function loginOf(value: unknown): string | undefined {

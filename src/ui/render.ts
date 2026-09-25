@@ -1,4 +1,5 @@
-import type { Issue, IssueState } from "../github/issues.ts";
+import { ISSUE_LIMIT, type Issue, type IssueState } from "../github/issues.ts";
+import { boardRows, lineOfSelection, selectableIssues, type BoardRow } from "../wayfinder/board.ts";
 
 export interface ListModel {
   kind: "list";
@@ -65,34 +66,40 @@ export function renderPane(model: PaneModel, columns: number, rows: number): str
 
 export function formatPlainIssues(repo: string, state: IssueState, issues: Issue[]): string {
   const lines = [`${repo}  (${state})`, ""];
-  if (issues.length === 0) {
+  const rows = boardRows(issues);
+  if (selectableIssues(rows).length === 0) {
     lines.push(`No ${state} issues.`);
   } else {
-    for (const issue of issues) lines.push(issueText(issue, 200));
+    for (const row of rows) lines.push(rowText(row, 200));
   }
   return lines.join("\n");
 }
 
 function listLines(model: ListModel, columns: number, rows: number): string[] {
   const windowSize = Math.max(rows - 3, 1);
-  const scroll = reveal(model.selected, model.scroll, windowSize);
-  const count = model.issues.length === 100 ? "100 (limit)" : String(model.issues.length);
-  const subtitle = model.notice ?? `${model.state} · ${count}`;
+  const laid = boardRows(model.issues);
+  const selectedLine = lineOfSelection(laid, model.selected);
+  const scroll = reveal(selectedLine, model.scroll, windowSize);
+  const count = model.issues.length === ISSUE_LIMIT ? `${ISSUE_LIMIT} (limit)` : String(model.issues.length);
+  const maps = model.issues.filter((issue) => issue.labels.includes("wayfinder:map")).length;
+  const summary = maps > 0 ? `${model.state} · ${count} · ${maps} ${maps === 1 ? "map" : "maps"}` : `${model.state} · ${count}`;
+  const subtitle = model.notice ?? summary;
   const lines = [
     pad(clip(`Wayfinder Companion  ${model.repo}`, columns), columns),
     pad(clip(subtitle, columns), columns),
   ];
-  if (model.issues.length === 0) {
+  if (selectableIssues(laid).length === 0) {
     lines.push(pad(clip(`No ${model.state} issues.`, columns), columns));
   } else {
     for (let index = 0; index < windowSize; index++) {
-      const issue = model.issues[scroll + index];
-      if (!issue) {
+      const row = laid[scroll + index];
+      if (!row) {
         lines.push(blank(columns));
         continue;
       }
-      const text = pad(issueText(issue, columns), columns);
-      lines.push(scroll + index === model.selected ? invert(text) : text);
+      const text = pad(rowText(row, columns), columns);
+      const selected = row.type === "issue" && scroll + index === selectedLine;
+      lines.push(selected ? invert(text) : text);
     }
   }
   while (lines.length < rows - 1) lines.push(blank(columns));
@@ -123,12 +130,14 @@ function messageLines(model: MessageModel, columns: number, rows: number): strin
   return lines.slice(0, rows);
 }
 
-function issueText(issue: Issue, width: number): string {
-  const prefix = `#${issue.number}  `;
-  const labels = issue.labels.length > 0 ? `  ${issue.labels.join(", ")}` : "";
-  const budget = width - [...prefix].length - [...labels].length;
-  if (budget < 8) return clip(`${prefix}${issue.title}`, width);
-  return `${prefix}${clip(issue.title, budget)}${labels}`;
+function rowText(row: BoardRow, width: number): string {
+  if (row.type === "label") return clip(row.text, width);
+  const indent = "  ".repeat(row.depth);
+  const prefix = `${indent}#${row.issue.number}  `;
+  const badges = row.badges.length > 0 ? `  ${row.badges.join(" · ")}` : "";
+  const budget = width - [...prefix].length - [...badges].length;
+  if (budget < 8) return clip(`${prefix}${row.issue.title}${badges}`, width);
+  return `${prefix}${clip(row.issue.title, budget)}${badges}`;
 }
 
 export function clip(text: string, width: number): string {

@@ -1,6 +1,6 @@
 # Wayfinder Companion
 
-A [Herdr](https://herdr.dev) plugin that lists the current repo's GitHub issues in a popup. The plugin id is `wayfinder.companion`.
+A [Herdr](https://herdr.dev) plugin that lists the current repo's GitHub issues in a split pane. Wayfinder maps are the roots, and the other tickets sit underneath them. The plugin id is `wayfinder.companion`.
 
 Herdr launches the commands in `herdr-plugin.toml`. This package is TypeScript run by [Bun](https://bun.sh). There is no compile step: `bun src/main.ts` is the entrypoint. The issue list comes from the GitHub CLI (`gh`), run in the focused pane's directory, or the workspace directory when the pane has none.
 
@@ -36,7 +36,7 @@ Install runs `bun install --frozen-lockfile`, then registers the plugin. Add the
 | `status` | Prints JSON with the invocation context, `herdr workspace list`, and `herdr agent list`. |
 | `open` | Opens the issue list for the current workspace's GitHub repo. |
 
-Inside the popup:
+Inside the pane, each `wayfinder:map` issue is a root. Children are issues whose body says `Part of #<map>`. A row's badges are its wayfinder state: `grilling`, `research`, `prototype`, `task`, or `delivery` (`ready-for-agent`), then `closed`, `blocked`, the assignee, or `frontier` when an open decision ticket is unassigned and not blocked.
 
 | Key | Action |
 | --- | --- |
@@ -45,7 +45,7 @@ Inside the popup:
 | esc | Return to the list |
 | `f` | Cycle open, closed, and all issues |
 | `r` | Refresh |
-| `q` | Close the popup |
+| `q` | Close the pane |
 
 Bind `open` in the Herdr config:
 

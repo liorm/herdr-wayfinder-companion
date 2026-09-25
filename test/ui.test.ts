@@ -9,6 +9,7 @@ const issue: Issue = {
   url: "https://example.com/7",
   labels: ["bug"],
   assignees: [],
+  closed: false,
 };
 
 describe("renderPane", () => {

@@ -41,7 +41,7 @@ Plugin ids may contain ASCII letters, digits, `.`, `:`, `_`, and `-`. Action, pa
 | `[[startup]]` | Once after session restore, when the API socket is ready, and again on live handoff. Not on client attach, config reload, link, or enable. One-shot: do the work and exit. Failure does not stop the server. | No |
 | `[[actions]]` | `herdr plugin action invoke`, a keybinding, or a link handler. | `status`, `open` |
 | `[[events]]` | When an enabled plugin's `on` name matches an emitted event. Unknown names link with a warning. | No |
-| `[[panes]]` | `herdr plugin pane open` or an action that calls it. | `board`, the issue popup |
+| `[[panes]]` | `herdr plugin pane open` or an action that calls it. | `board`, a split pane |
 | `[[link_handlers]]` | Ctrl-click on a terminal URL whose Rust regex matches. `action` must be an action in the same plugin. | No |
 
 `plugin link` does not run `[[build]]`. Install dependencies yourself while developing. There is no `plugin update` in v1. Reinstall from GitHub to refresh a managed checkout. `plugin unlink` unregisters a local plugin and leaves the files. Install over a linked plugin is refused.
@@ -112,7 +112,9 @@ Marketplace listing is the GitHub topic `herdr-plugin` on a public repo whose de
 
 `placement` is `overlay` by default. `plugin pane open` can override it with `overlay`, `popup`, `split`, `tab`, or `zoomed`.
 
-This plugin's `board` entrypoint is a `popup` at `80%` by `70%`. A popup is session-modal. It takes terminal input, including Escape, and closes when the process exits or `popup.close` is sent. It has no pane id, emits no pane events, and is outside pane, layout, persistence, and agent APIs. The process does not get `HERDR_PANE_ID`. The underlying tiled pane is still in `HERDR_PLUGIN_CONTEXT_JSON`. Opening a popup returns `ui_busy` while Settings, copy mode, or another modal is open.
+This plugin's `board` entrypoint is `placement = "split"`. `open` also passes `--placement split --direction right --focus`, so the issues UI is a normal tiled pane beside the focused pane. It receives `HERDR_PANE_ID` and `HERDR_PLUGIN_ENTRYPOINT_ID=board`. `q` restores the terminal and runs `herdr pane close` on that id. Quit closes the pane only for that entrypoint, so a process that merely inherited `HERDR_PANE_ID` leaves the current pane alone.
+
+A `popup` placement is different. It is session-modal, takes terminal input including Escape, and closes when the process exits or `popup.close` is sent. It has no pane id, emits no pane events, and is outside pane, layout, persistence, and agent APIs. The process does not get `HERDR_PANE_ID`. The underlying tiled pane is still in `HERDR_PLUGIN_CONTEXT_JSON`. Opening a popup returns `ui_busy` while Settings, copy mode, or another modal is open. Width and height apply to popups.
 
 `overlay`, `split`, `tab`, and `zoomed` panes are normal Herdr panes after they open. They can be moved, resized, and zoomed, and plugin ownership follows the pane.
 
@@ -143,6 +145,6 @@ Herdr checks `on` against known event names at link time. A typo links with a wa
 
 ## How this repo uses the surface
 
-`open` asks Herdr to launch the `board` pane. `ui` is that pane. It resolves the repo directory from the context, then runs `gh` there. `status` prints the context plus `herdr workspace list` and `herdr agent list`, which is the debug view of the same invocation.
+`open` asks Herdr to launch the `board` pane as a split. `ui` is that pane. It resolves the repo directory from the context, then runs `gh` there. Issues labelled `wayfinder:map` are roots. Other issues nest under the map named by `Part of #<n>` in the body. Decision labels are `wayfinder:grilling`, `wayfinder:research`, `wayfinder:prototype`, and `wayfinder:task`. `ready-for-agent` is delivery. A row can also show closed, blocked (`Blocked by` still open), the assignee, frontier (open decision ticket, unassigned, not blocked), and any extra labels. `status` prints the context plus `herdr workspace list` and `herdr agent list`, which is the debug view of the same invocation.
 
 `src/herdr.ts` is the CLI wrapper. `src/github/issues.ts` is the `gh` wrapper. Neither talks to the socket directly. Use the CLI unless a later feature needs a subscription, graphics, or a method the CLI does not expose.

@@ -4,7 +4,21 @@ import { chmodSync } from "node:fs";
 const root = new URL("..", import.meta.url).pathname;
 const fixture = new URL("./fixtures/gh", import.meta.url).pathname;
 
-test("the popup lists issues from gh and closes on q", async () => {
+function testEnv(context: Record<string, unknown>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: `${new URL("./fixtures", import.meta.url).pathname}:${process.env.PATH ?? ""}`,
+    HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify(context),
+  };
+  delete env.HERDR_PANE_ID;
+  delete env.HERDR_BIN_PATH;
+  delete env.HERDR_PLUGIN_ENTRYPOINT_ID;
+  delete env.HERDR_WORKSPACE_ID;
+  delete env.HERDR_TAB_ID;
+  return env;
+}
+
+test("the pane lists issues from gh and closes on q", async () => {
   chmodSync(fixture, 0o755);
   const script = `
 import os, pty, select, time, sys
@@ -60,11 +74,7 @@ if not exited:
     cwd: root,
     stdout: "pipe",
     stderr: "pipe",
-    env: {
-      ...process.env,
-      PATH: `${new URL("./fixtures", import.meta.url).pathname}:${process.env.PATH ?? ""}`,
-      HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ focused_pane_cwd: root }),
-    },
+    env: testEnv({ focused_pane_cwd: root }),
   });
   const [stdout, stderr, status] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -81,11 +91,7 @@ test("ui prints the issue list when it is not attached to a terminal", async () 
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",
-    env: {
-      ...process.env,
-      PATH: `${new URL("./fixtures", import.meta.url).pathname}:${process.env.PATH ?? ""}`,
-      HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_cwd: root }),
-    },
+    env: testEnv({ workspace_cwd: root }),
   });
   const [stdout, stderr, status] = await Promise.all([
     new Response(proc.stdout).text(),

@@ -7,6 +7,7 @@ import {
   type IssueState,
 } from "../github/issues.ts";
 import { keyFromPress, type InputKey } from "./keys.ts";
+import { boardRows, lineOfSelection, selectableIssues } from "../wayfinder/board.ts";
 import {
   formatPlainIssues,
   moveScroll,
@@ -22,14 +23,21 @@ import {
 const MISSING_DIRECTORY =
   "No workspace directory in the Herdr context. Open Wayfinder Companion from a workspace.";
 
-export async function runIssuePane(cwd: string | undefined): Promise<number> {
-  if (!cwd) return presentMessage(MISSING_DIRECTORY, 1);
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return printIssues(cwd);
+export async function runIssuePane(
+  cwd: string | undefined,
+  options?: { onClose?: () => Promise<void> },
+): Promise<number> {
+  try {
+    if (!cwd) return await presentMessage(MISSING_DIRECTORY, 1);
+    if (!process.stdin.isTTY || !process.stdout.isTTY) return await printIssues(cwd);
 
-  const loaded = await loadIssues(cwd, "open");
-  if (!loaded.ok) return presentMessage(loaded.message, 1);
-  await browse(cwd, listModel(loaded.repo, loaded.state, loaded.issues, 0));
-  return 0;
+    const loaded = await loadIssues(cwd, "open");
+    if (!loaded.ok) return await presentMessage(loaded.message, 1);
+    await browse(cwd, listModel(loaded.repo, loaded.state, loaded.issues, 0));
+    return 0;
+  } finally {
+    await options?.onClose?.().catch(() => {});
+  }
 }
 
 async function printIssues(cwd: string): Promise<number> {
@@ -147,23 +155,25 @@ function listModel(
   selected: number | undefined,
   rows = termRows(),
 ): ListModel {
+  const arranged = selectableIssues(boardRows(issues));
   const index = selected === undefined ? 0 : selected;
-  const chosen = issues.length === 0 ? 0 : Math.min(index, issues.length - 1);
+  const chosen = arranged.length === 0 ? 0 : Math.min(index, arranged.length - 1);
   const windowSize = Math.max(rows - 3, 1);
   return {
     kind: "list",
     repo,
     state,
-    issues,
+    issues: arranged,
     selected: chosen,
-    scroll: reveal(chosen, 0, windowSize),
+    scroll: reveal(lineOfSelection(boardRows(arranged), chosen), 0, windowSize),
   };
 }
 
 function moveSelection(model: ListModel, delta: number, windowSize: number): ListModel {
   if (model.issues.length === 0) return model;
   const selected = Math.min(model.issues.length - 1, Math.max(0, model.selected + delta));
-  return { ...model, selected, scroll: reveal(selected, model.scroll, windowSize), notice: undefined };
+  const line = lineOfSelection(boardRows(model.issues), selected);
+  return { ...model, selected, scroll: reveal(line, model.scroll, windowSize), notice: undefined };
 }
 
 function scrollDetail(model: DetailModel, delta: number): DetailModel {

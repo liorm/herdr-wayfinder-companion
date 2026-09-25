@@ -24,7 +24,5 @@ command = ["bun", "src/main.ts", "open"]
 [[panes]]
 id = "board"
 title = "Wayfinder Companion"
-placement = "popup"
-width = "80%"
-height = "70%"
+placement = "split"
 command = ["bun", "src/main.ts", "ui"]

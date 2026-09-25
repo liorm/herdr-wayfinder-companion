@@ -53,6 +53,11 @@ export async function open(): Promise<number> {
     runtime.pluginId,
     "--entrypoint",
     "board",
+    "--placement",
+    "split",
+    "--direction",
+    "right",
+    "--focus",
   ]);
   if (!call.ok) {
     console.error(call.stderr.trim() || call.stdout.trim() || `herdr exited ${call.status}`);
@@ -63,7 +68,17 @@ export async function open(): Promise<number> {
 }
 
 export async function ui(): Promise<number> {
-  return runIssuePane(repoDirectory(readRuntime().context));
+  const runtime = readRuntime();
+  // Only the board entrypoint owns its pane. A test or shell that inherits
+  // HERDR_PANE_ID from this session must not close that pane on quit.
+  const paneId = runtime.entrypointId === "board" ? runtime.paneId : undefined;
+  return runIssuePane(repoDirectory(runtime.context), {
+    onClose: paneId
+      ? async () => {
+          await createClient(runtime.binPath)(["pane", "close", paneId]);
+        }
+      : undefined,
+  });
 }
 
 export function help(): void {
@@ -71,7 +86,7 @@ export function help(): void {
 
 Commands:
   status    Print session context and Herdr workspace/agent lists as JSON
-  open      Open the GitHub issues popup for the current workspace
-  ui        Render the issues popup (Herdr pane entrypoint)
+  open      Open the GitHub issues pane for the current workspace
+  ui        Render the issues pane (Herdr pane entrypoint)
 `);
 }

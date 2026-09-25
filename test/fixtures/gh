@@ -5,7 +5,7 @@ if [ "$args" = "repo view --json nameWithOwner" ]; then
   printf '%s\n' '{"nameWithOwner":"acme/widgets"}'
   exit 0
 fi
-if [ "$args" = "issue list --state open --limit 100 --json number,title,labels,assignees,updatedAt,author,url" ]; then
+if [ "$args" = "issue list --state open --limit 200 --json number,title,labels,assignees,updatedAt,author,url,body,state" ]; then
   printf '%s\n' '[{"number":7,"title":"Fix the gate","labels":[{"name":"bug"}],"assignees":[],"author":{"login":"ada"},"url":"https://example.com/7"}]'
   exit 0
 fi

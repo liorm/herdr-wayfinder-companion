@@ -26,6 +26,7 @@ describe("parseIssues", () => {
         author: "ada",
         labels: ["bug"],
         assignees: ["grace"],
+        closed: false,
       },
     ]);
   });
@@ -52,6 +53,7 @@ describe("loadIssues", () => {
           author: "ada",
           labels: ["bug"],
           assignees: ["grace"],
+          closed: false,
         },
       ],
     });
