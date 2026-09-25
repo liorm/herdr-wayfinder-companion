@@ -1,0 +1,30 @@
+id = "wayfinder.companion"
+name = "Wayfinder Companion"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Show the current repo's GitHub issues in a Herdr pane."
+platforms = ["linux", "macos", "windows"]
+
+# Runs on `herdr plugin install` only. `plugin link` does not run build commands.
+[[build]]
+command = ["bun", "install", "--frozen-lockfile"]
+
+[[actions]]
+id = "status"
+title = "Session status"
+contexts = ["workspace"]
+command = ["bun", "src/main.ts", "status"]
+
+[[actions]]
+id = "open"
+title = "Open Wayfinder Companion"
+contexts = ["workspace"]
+command = ["bun", "src/main.ts", "open"]
+
+[[panes]]
+id = "board"
+title = "Wayfinder Companion"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["bun", "src/main.ts", "ui"]
