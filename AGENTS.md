@@ -2,6 +2,8 @@
 
 Herdr plugin `wayfinder.companion`. It lists GitHub issues for the current workspace in a popup. The code is TypeScript run by Bun, with no compile step.
 
+Read [docs/herdr-plugin.md](docs/herdr-plugin.md) before adding actions, panes, events, or Herdr CLI calls. It records what a Herdr plugin can do, what plugin v1 does not provide, and how this repo uses that surface.
+
 ## Layout
 
 - `herdr-plugin.toml` declares the actions and the popup. Herdr runs `bun src/main.ts`.
