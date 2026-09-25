@@ -5,8 +5,19 @@ export type TicketKind = "map" | "grilling" | "research" | "prototype" | "task" 
 
 const DECISIONS = ["grilling", "research", "prototype", "task"] as const;
 
+/** Work state painted on a list row. Ticket kind stays text; color follows this. */
+export type RowTone =
+  | "blocked"
+  | "progress"
+  | "frontier"
+  | "ready"
+  | "attention"
+  | "closed"
+  | "map"
+  | "plain";
+
 export type BoardRow =
-  | { type: "issue"; issue: Issue; depth: number; kind: TicketKind; badges: string[] }
+  | { type: "issue"; issue: Issue; depth: number; kind: TicketKind; badges: string[]; tone: RowTone }
   | { type: "label"; text: string };
 
 export function ticketKind(labels: string[]): TicketKind {
@@ -126,10 +137,13 @@ function sortChildren(issues: Issue[]): Issue[] {
 
 function issueRow(issue: Issue, depth: number, all: Issue[]): BoardRow {
   const kind = ticketKind(issue.labels);
-  return { type: "issue", issue, depth, kind, badges: badgesFor(issue, kind, all) };
+  const openNumbers = new Set(all.filter((item) => !item.closed).map((item) => item.number));
+  const blocked = !issue.closed && blockerNumbers(issue.body).some((number) => openNumbers.has(number));
+  const badges = badgesFor(issue, kind, blocked);
+  return { type: "issue", issue, depth, kind, badges, tone: rowTone(issue, kind, blocked) };
 }
 
-function badgesFor(issue: Issue, kind: TicketKind, all: Issue[]): string[] {
+function badgesFor(issue: Issue, kind: TicketKind, blocked: boolean): string[] {
   const badges: string[] = [];
   if (kind === "other") {
     if (issue.labels.length > 0) badges.push(issue.labels.join(", "));
@@ -139,13 +153,25 @@ function badgesFor(issue: Issue, kind: TicketKind, all: Issue[]): string[] {
     if (extras.length > 0) badges.push(extras.join(", "));
   }
   if (issue.closed) badges.push("closed");
-
-  const openNumbers = new Set(all.filter((item) => !item.closed).map((item) => item.number));
-  const blocked = !issue.closed && blockerNumbers(issue.body).some((number) => openNumbers.has(number));
   if (blocked) badges.push("blocked");
-  if (!issue.closed && issue.assignees.length > 0) badges.push(issue.assignees[0] ?? "");
+  if (!issue.closed && issue.assignees.length > 0) {
+    if (!blocked) badges.push("in progress");
+    badges.push(issue.assignees[0] ?? "");
+  }
   if (isFrontier(issue, kind, blocked)) badges.push("frontier");
   return badges.filter((badge) => badge.length > 0);
+}
+
+/** One color per row. Blocked and claimed beat "available" states. */
+export function rowTone(issue: Issue, kind: TicketKind, blocked: boolean): RowTone {
+  if (issue.closed) return "closed";
+  if (blocked) return "blocked";
+  if (issue.assignees.length > 0) return "progress";
+  if (issue.labels.includes("needs-info") || issue.labels.includes("needs-triage")) return "attention";
+  if (isFrontier(issue, kind, blocked)) return "frontier";
+  if (kind === "delivery" || issue.labels.includes("ready-for-human")) return "ready";
+  if (kind === "map") return "map";
+  return "plain";
 }
 
 function isKindLabel(label: string, kind: TicketKind): boolean {
@@ -158,5 +184,6 @@ function isKindLabel(label: string, kind: TicketKind): boolean {
 function isFrontier(issue: Issue, kind: TicketKind, blocked: boolean): boolean {
   if (issue.closed || blocked || issue.assignees.length > 0) return false;
   if (issue.labels.includes("ready-for-agent")) return false;
+  if (issue.labels.includes("needs-triage") || issue.labels.includes("needs-info")) return false;
   return kind === "grilling" || kind === "research" || kind === "prototype" || kind === "task";
 }

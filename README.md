@@ -36,7 +36,9 @@ Install runs `bun install --frozen-lockfile`, then registers the plugin. Add the
 | `status` | Prints JSON with the invocation context, `herdr workspace list`, and `herdr agent list`. |
 | `open` | Opens the issue list for the current workspace's GitHub repo. |
 
-Inside the pane, each `wayfinder:map` issue is a root. Children are issues whose body says `Part of #<map>`. A row's badges are its wayfinder state: `grilling`, `research`, `prototype`, `task`, or `delivery` (`ready-for-agent`), then `closed`, `blocked`, the assignee, or `frontier` when an open decision ticket is unassigned and not blocked.
+Inside the pane, each `wayfinder:map` issue is a root. Children are issues whose body says `Part of #<map>`. A row's badges are its wayfinder state: `grilling`, `research`, `prototype`, `task`, or `delivery` (`ready-for-agent`), then `closed`, `blocked`, `in progress` plus the assignee when someone has claimed it, or `frontier` when an open decision ticket is unassigned and not blocked.
+
+The list colors that work state. In progress is green, blocked is red, frontier is cyan, an unblocked `ready-for-agent` or `ready-for-human` ticket is magenta, `needs-triage` and `needs-info` are yellow, maps are blue, and closed rows are dim. The selected row stays inverted.
 
 | Key | Action |
 | --- | --- |

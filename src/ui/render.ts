@@ -1,5 +1,5 @@
 import { ISSUE_LIMIT, type Issue, type IssueState } from "../github/issues.ts";
-import { boardRows, lineOfSelection, selectableIssues, type BoardRow } from "../wayfinder/board.ts";
+import { boardRows, lineOfSelection, selectableIssues, type BoardRow, type RowTone } from "../wayfinder/board.ts";
 
 export interface ListModel {
   kind: "list";
@@ -99,7 +99,8 @@ function listLines(model: ListModel, columns: number, rows: number): string[] {
       }
       const text = pad(rowText(row, columns), columns);
       const selected = row.type === "issue" && scroll + index === selectedLine;
-      lines.push(selected ? invert(text) : text);
+      const tone = row.type === "issue" ? row.tone : "plain";
+      lines.push(paint(text, tone, selected, row.type === "label"));
     }
   }
   while (lines.length < rows - 1) lines.push(blank(columns));
@@ -157,6 +158,23 @@ function blank(width: number): string {
   return " ".repeat(Math.max(width, 0));
 }
 
-function invert(text: string): string {
-  return `\x1b[7m${text}\x1b[27m`;
+/** SGR codes. Kind stays uncolored; these are the work states on a pass-the-ink board. */
+const TONE_SGR: Record<RowTone, string | undefined> = {
+  blocked: "31",
+  progress: "32",
+  frontier: "36",
+  ready: "35",
+  attention: "33",
+  closed: "2",
+  map: "34",
+  plain: undefined,
+};
+
+function paint(text: string, tone: RowTone, selected: boolean, label = false): string {
+  const color = label ? "2" : TONE_SGR[tone];
+  if (!color && !selected) return text;
+  let open = "";
+  if (color) open += `\x1b[${color}m`;
+  if (selected) open += "\x1b[7m";
+  return `${open}${text}\x1b[0m`;
 }

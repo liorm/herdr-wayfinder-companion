@@ -66,21 +66,49 @@ describe("boardRows", () => {
   test("nests children under maps and keeps unrelated issues in Other", () => {
     const rows = boardRows([bug, blocked, claimed, research, map, childOfMissing]);
     expect(rows.map(describeRow)).toEqual([
-      "issue #140 depth 0 map",
-      "issue #141 depth 1 research · frontier",
-      "issue #143 depth 1 grilling · liorm",
-      "issue #171 depth 1 delivery · blocked",
+      "issue #140 depth 0 map [map]",
+      "issue #141 depth 1 research · frontier [frontier]",
+      "issue #143 depth 1 grilling · in progress · liorm [progress]",
+      "issue #171 depth 1 delivery · blocked [blocked]",
       "label Map #60",
-      "issue #64 depth 1 grilling · closed",
+      "issue #64 depth 1 grilling · closed [closed]",
       "label Other",
-      "issue #4 depth 0 bug",
+      "issue #4 depth 0 bug [plain]",
+    ]);
+  });
+
+  test("lets blocked and triage beat an otherwise available ticket", () => {
+    const triage = issue({
+      number: 128,
+      title: "What product metrics do we need first?",
+      labels: ["wayfinder:grilling", "needs-triage"],
+    });
+    const ready = issue({
+      number: 179,
+      title: "Grant Admin from the env list only when none exist",
+      labels: ["ready-for-agent"],
+      body: "Part of #140\nBlocked by: None\n",
+    });
+    const waiting = issue({
+      number: 12,
+      title: "Need a repro",
+      labels: ["needs-info"],
+    });
+    const rows = boardRows([map, triage, ready, waiting, claimed]);
+    expect(rows.map(describeRow)).toEqual([
+      "issue #140 depth 0 map [map]",
+      "issue #143 depth 1 grilling · in progress · liorm [progress]",
+      "issue #179 depth 1 delivery [ready]",
+      "label Other",
+      "issue #128 depth 0 grilling · needs-triage [attention]",
+      "issue #12 depth 0 needs-info [attention]",
     ]);
   });
 
   test("leaves a repo without maps as a flat list", () => {
     const rows = boardRows([bug]);
     expect(rows).toEqual([
-      { type: "issue", issue: bug, depth: 0, kind: "other", badges: ["bug"] },
+      { type: "issue", issue: bug, depth: 0, kind: "other", badges: ["bug"], tone: "plain" },
     ]);
   });
 });
@@ -101,12 +129,33 @@ describe("render", () => {
     expect(frame).toContain("#140");
     expect(frame).toContain("  #141");
     expect(frame).toContain("research · frontier");
+    expect(frame).toContain("\x1b[34m");
+    expect(frame).toContain("\x1b[36m");
+    expect(frame).toContain("\x1b[32m");
+    expect(frame).toContain("in progress");
     expect(frame).toContain("\x1b[7m");
-    expect(formatPlainIssues("acme/ink", "open", issues)).toContain("  #141  Current admin vs user gating inventory  research · frontier");
+    expect(formatPlainIssues("acme/ink", "open", issues)).toContain(
+      "  #141  Current admin vs user gating inventory  research · frontier",
+    );
+  });
+
+  test("paints blocked rows red and leaves the plain list uncolored", () => {
+    const model: ListModel = {
+      kind: "list",
+      repo: "acme/ink",
+      state: "open",
+      issues: [map, blocked, claimed],
+      selected: 0,
+      scroll: 0,
+    };
+    const frame = renderPane(model, 80, 10);
+    expect(frame).toContain("\x1b[31m");
+    expect(frame).toContain("blocked");
+    expect(formatPlainIssues("acme/ink", "open", [map, blocked, claimed])).not.toContain("\x1b[");
   });
 });
 
 function describeRow(row: ReturnType<typeof boardRows>[number]): string {
   if (row.type === "label") return `label ${row.text}`;
-  return `issue #${row.issue.number} depth ${row.depth} ${row.badges.join(" · ")}`;
+  return `issue #${row.issue.number} depth ${row.depth} ${row.badges.join(" · ")} [${row.tone}]`;
 }
