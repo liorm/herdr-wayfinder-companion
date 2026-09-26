@@ -174,6 +174,50 @@ describe("runDeliveryWorkflow", () => {
     expect(executedHerdr).toContainEqual(["agent", "prompt", "w1:pA", "/model Claude 3.7 Sonnet medium"]);
   });
 
+  test("runs delivery workflow with agy default model", async () => {
+    const executedHerdr: string[][] = [];
+
+    const mockHerdr = async (args: string[]): Promise<HerdrCall> => {
+      executedHerdr.push(args);
+      if (args[0] === "agent" && args[1] === "get") {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: { result: { agent: { agent_status: "idle", title: "Done" } } },
+        };
+      }
+      return { ok: true, status: 0, stdout: "", stderr: "", json: null };
+    };
+
+    const mockGit: GitRunner = async () => ({ status: 0, stdout: "", stderr: "" });
+    const mockGh: GhRunner = async () => ({
+      status: 0,
+      stdout: JSON.stringify([{ number: 102, title: "PR", url: "https://github.com/example/repo/pull/102", state: "OPEN" }]),
+      stderr: "",
+    });
+
+    const agySibling: SiblingAgent = {
+      paneId: "w1:pA",
+      agent: "agy",
+      status: "idle",
+    };
+
+    const finalState = await runDeliveryWorkflow({
+      cwd: "/fake/repo",
+      issue: sampleDeliveryIssue,
+      sibling: agySibling,
+      client: mockHerdr,
+      runGit: mockGit,
+      runGh: mockGh,
+      pollIntervalMs: 10,
+    });
+
+    expect(finalState.isFinished).toBe(true);
+    expect(executedHerdr).toContainEqual(["agent", "prompt", "w1:pA", "/model gemini-3.7-flash-low"]);
+  });
+
   test("handles failure in branch creation", async () => {
     const mockHerdr = async (): Promise<HerdrCall> => ({ ok: true, status: 0, stdout: "", stderr: "", json: null });
     const mockFailingGit: GitRunner = async (args) => {

@@ -219,7 +219,9 @@ export async function runDeliveryWorkflow(
 
   // --- Step 3: Set agent model to low effort ---
   setStepStatus("model", "running");
-  const model = options.model ?? getModelForTicketKind("delivery", options);
+  const model =
+    options.model ??
+    getModelForTicketKind("delivery", { ...options, agent: options.agent ?? options.sibling.agent });
   const modelCall = await client(["agent", "prompt", target, `/model ${model}`]);
   if (!modelCall.ok) {
     const errorMsg = `Failed to set model: ${herdrErrorMessage(modelCall)}`;

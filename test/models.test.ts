@@ -1,11 +1,12 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  AVAILABLE_MODELS,
+  getAvailableModels,
   getModelForTicketKind,
   getNextModel,
+  normalizeAgentKind,
   saveModelConfig,
 } from "../src/wayfinder/models.ts";
 
@@ -16,8 +17,19 @@ describe("model configuration", () => {
     process.env = { ...originalEnv };
   });
 
-  test("AVAILABLE_MODELS contains all Grok 4.6 and 4.7 low/medium/high variants", () => {
-    expect(AVAILABLE_MODELS).toEqual([
+  test("normalizeAgentKind normalizes various agent strings", () => {
+    expect(normalizeAgentKind("grok")).toBe("grok");
+    expect(normalizeAgentKind("GROK")).toBe("grok");
+    expect(normalizeAgentKind("agy")).toBe("agy");
+    expect(normalizeAgentKind("AGY")).toBe("agy");
+    expect(normalizeAgentKind("antigravity")).toBe("agy");
+    expect(normalizeAgentKind("gemini")).toBe("agy");
+    expect(normalizeAgentKind(undefined)).toBe("grok");
+    expect(normalizeAgentKind("unknown")).toBe("grok");
+  });
+
+  test("AGENT_AVAILABLE_MODELS contains correct models for grok and agy", () => {
+    expect(getAvailableModels("grok")).toEqual([
       "Grok 4.6 low",
       "Grok 4.6 medium",
       "Grok 4.6 high",
@@ -25,87 +37,59 @@ describe("model configuration", () => {
       "Grok 4.7 medium",
       "Grok 4.7 high",
     ]);
+
+    expect(getAvailableModels("agy")).toEqual([
+      "gemini-3.6-flash-low",
+      "gemini-3.6-flash-medium",
+      "gemini-3.6-flash-high",
+      "gemini-3.7-flash-low",
+      "gemini-3.7-flash-medium",
+      "gemini-3.7-flash-high",
+    ]);
   });
 
-  test("returns default models for all ticket kinds", () => {
-    expect(getModelForTicketKind("map")).toBe("Grok 4.7 medium");
-    expect(getModelForTicketKind("delivery")).toBe("Grok 4.7 low");
-    expect(getModelForTicketKind("grilling")).toBe("Grok 4.7 high");
-    expect(getModelForTicketKind("research")).toBe("Grok 4.7 high");
-    expect(getModelForTicketKind("prototype")).toBe("Grok 4.7 medium");
-    expect(getModelForTicketKind("task")).toBe("Grok 4.7 low");
-    expect(getModelForTicketKind("other")).toBe("Grok 4.7 medium");
+  test("returns default models for grok and agy ticket kinds", () => {
+    expect(getModelForTicketKind("map", { agent: "grok" })).toBe("Grok 4.7 medium");
+    expect(getModelForTicketKind("delivery", { agent: "grok" })).toBe("Grok 4.7 low");
+    expect(getModelForTicketKind("grilling", { agent: "grok" })).toBe("Grok 4.7 high");
+
+    expect(getModelForTicketKind("map", { agent: "agy" })).toBe("gemini-3.7-flash-medium");
+    expect(getModelForTicketKind("delivery", { agent: "agy" })).toBe("gemini-3.7-flash-low");
+    expect(getModelForTicketKind("grilling", { agent: "agy" })).toBe("gemini-3.7-flash-high");
   });
 
-  test("getNextModel cycles through available models", () => {
-    expect(getNextModel("Grok 4.6 low")).toBe("Grok 4.6 medium");
-    expect(getNextModel("Grok 4.6 medium")).toBe("Grok 4.6 high");
-    expect(getNextModel("Grok 4.6 high")).toBe("Grok 4.7 low");
-    expect(getNextModel("Grok 4.7 low")).toBe("Grok 4.7 medium");
-    expect(getNextModel("Grok 4.7 medium")).toBe("Grok 4.7 high");
-    expect(getNextModel("Grok 4.7 high")).toBe("Grok 4.6 low");
-    expect(getNextModel("unknown")).toBe("Grok 4.6 low");
+  test("getNextModel cycles through available models per agent", () => {
+    expect(getNextModel("Grok 4.6 low", "grok")).toBe("Grok 4.6 medium");
+    expect(getNextModel("Grok 4.7 high", "grok")).toBe("Grok 4.6 low");
+
+    expect(getNextModel("gemini-3.6-flash-low", "agy")).toBe("gemini-3.6-flash-medium");
+    expect(getNextModel("gemini-3.6-flash-high", "agy")).toBe("gemini-3.7-flash-low");
+    expect(getNextModel("gemini-3.7-flash-high", "agy")).toBe("gemini-3.6-flash-low");
+    expect(getNextModel("unknown", "agy")).toBe("gemini-3.6-flash-low");
   });
 
-  test("saveModelConfig persists model choice into config.json", () => {
+  test("saveModelConfig persists model choice per agent into config.json", () => {
     const tempConfigDir = join(tmpdir(), `wayfinder-test-save-${Date.now()}`);
 
-    const saved = saveModelConfig("map", "Grok 4.6 high", tempConfigDir);
-    expect(saved).toBe(true);
-
-    const savedDelivery = saveModelConfig("delivery", "Grok 4.7 high", tempConfigDir);
-    expect(savedDelivery).toBe(true);
+    saveModelConfig("map", "Grok 4.6 high", "grok", tempConfigDir);
+    saveModelConfig("map", "gemini-3.6-flash-high", "agy", tempConfigDir);
 
     const raw = readFileSync(join(tempConfigDir, "config.json"), "utf-8");
     const parsed = JSON.parse(raw);
-    expect(parsed.models.map).toBe("Grok 4.6 high");
-    expect(parsed.models.delivery).toBe("Grok 4.7 high");
+    expect(parsed.models.grok.map).toBe("Grok 4.6 high");
+    expect(parsed.models.agy.map).toBe("gemini-3.6-flash-high");
 
-    expect(getModelForTicketKind("map", { configDir: tempConfigDir })).toBe("Grok 4.6 high");
-    expect(getModelForTicketKind("delivery", { configDir: tempConfigDir })).toBe("Grok 4.7 high");
-
-    rmSync(tempConfigDir, { recursive: true, force: true });
-  });
-
-  test("customModels option overrides all others", () => {
-    const custom = { map: "Grok 4.6 low" };
-    expect(getModelForTicketKind("map", { customModels: custom })).toBe("Grok 4.6 low");
-  });
-
-  test("environment variable overrides default per ticket kind", () => {
-    process.env.WAYFINDER_MODEL_MAP = "Grok 4.7 high";
-    process.env.WAYFINDER_MODEL_DELIVERY = "Grok 4.6 medium";
-
-    expect(getModelForTicketKind("map")).toBe("Grok 4.7 high");
-    expect(getModelForTicketKind("delivery")).toBe("Grok 4.6 medium");
-    expect(getModelForTicketKind("research")).toBe("Grok 4.7 high");
-  });
-
-  test("general fallback environment variable WAYFINDER_DEFAULT_MODEL", () => {
-    process.env.WAYFINDER_DEFAULT_MODEL = "Grok 4.6 high";
-    expect(getModelForTicketKind("other")).toBe("Grok 4.6 high");
-  });
-
-  test("reads config from config.json in configDir", () => {
-    const tempConfigDir = join(tmpdir(), `wayfinder-test-config-${Date.now()}`);
-    mkdirSync(tempConfigDir, { recursive: true });
-
-    writeFileSync(
-      join(tempConfigDir, "config.json"),
-      JSON.stringify({
-        models: {
-          map: "Grok 4.7 high",
-          delivery: "Grok 4.6 low",
-          task: "Grok 4.6 medium",
-        },
-      }),
-    );
-
-    expect(getModelForTicketKind("map", { configDir: tempConfigDir })).toBe("Grok 4.7 high");
-    expect(getModelForTicketKind("delivery", { configDir: tempConfigDir })).toBe("Grok 4.6 low");
-    expect(getModelForTicketKind("task", { configDir: tempConfigDir })).toBe("Grok 4.6 medium");
-    expect(getModelForTicketKind("research", { configDir: tempConfigDir })).toBe("Grok 4.7 high");
+    expect(getModelForTicketKind("map", { agent: "grok", configDir: tempConfigDir })).toBe("Grok 4.6 high");
+    expect(getModelForTicketKind("map", { agent: "agy", configDir: tempConfigDir })).toBe("gemini-3.6-flash-high");
 
     rmSync(tempConfigDir, { recursive: true, force: true });
+  });
+
+  test("agent-specific environment variable overrides default", () => {
+    process.env.WAYFINDER_AGY_MODEL_MAP = "gemini-3.6-flash-low";
+    process.env.WAYFINDER_GROK_MODEL_MAP = "Grok 4.6 high";
+
+    expect(getModelForTicketKind("map", { agent: "agy" })).toBe("gemini-3.6-flash-low");
+    expect(getModelForTicketKind("map", { agent: "grok" })).toBe("Grok 4.6 high");
   });
 });

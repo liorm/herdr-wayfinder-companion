@@ -30,12 +30,12 @@ import { ModelDialog } from "./components/ModelDialog.tsx";
 import { createErrorDialog, type DialogState } from "./dialog.ts";
 import { refreshBoardState } from "./issues.tsx";
 import {
-  AVAILABLE_MODELS,
+  getAvailableModels,
   getModelForTicketKind,
   getNextModel,
+  normalizeAgentKind,
   readConfigFile,
   saveModelConfig,
-  type AvailableModel,
 } from "../wayfinder/models.ts";
 import type { TicketKind } from "../wayfinder/board.ts";
 
@@ -125,11 +125,12 @@ export const App: React.FC<AppProps> = ({
   const [errorDialog, setErrorDialog] = useState<DialogState | null>(initialError ?? null);
   const [modelDialog, setModelDialog] = useState<{
     kind: TicketKind;
+    agent?: string;
     issueNumber?: number;
     selectedIndex: number;
   } | null>(null);
   const [customModels, setCustomModels] = useState<Partial<Record<TicketKind, string>>>(
-    () => readConfigFile(runtime?.configDir) ?? {},
+    () => readConfigFile(runtime?.configDir, initialSibling?.agent) ?? {},
   );
 
   const showError = useCallback((message: string, title: string = "Error", detail?: string) => {
@@ -298,6 +299,7 @@ export const App: React.FC<AppProps> = ({
       }
       setDeliveryDialog(
         createInitialDeliveryState(targetIssue, existingPR, {
+          agent: sibling?.agent,
           configDir: runtime?.configDir,
           customModels,
         }),
@@ -308,6 +310,7 @@ export const App: React.FC<AppProps> = ({
     setNotice(`Starting work on #${targetIssue.number}…`);
     const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
     const result = await dispatchWork(targetIssue, sibling, client, {
+      agent: sibling?.agent,
       configDir: runtime?.configDir,
       customModels,
     });
@@ -327,6 +330,7 @@ export const App: React.FC<AppProps> = ({
     }
 
     if (modelDialog) {
+      const available = getAvailableModels(modelDialog.agent);
       if (key.upArrow || input === "k") {
         setModelDialog((prev) =>
           prev ? { ...prev, selectedIndex: Math.max(0, prev.selectedIndex - 1) } : null,
@@ -338,17 +342,19 @@ export const App: React.FC<AppProps> = ({
           prev
             ? {
                 ...prev,
-                selectedIndex: Math.min(AVAILABLE_MODELS.length - 1, prev.selectedIndex + 1),
+                selectedIndex: Math.min(available.length - 1, prev.selectedIndex + 1),
               }
             : null,
         );
         return;
       }
       if (key.return || (key as { name?: string }).name === "enter" || input === " ") {
-        const chosenModel = AVAILABLE_MODELS[modelDialog.selectedIndex]!;
+        const chosenModel = available[modelDialog.selectedIndex]!;
         setCustomModels((prev) => ({ ...prev, [modelDialog.kind]: chosenModel }));
-        saveModelConfig(modelDialog.kind, chosenModel, runtime?.configDir);
-        setNotice(`Saved model for ${modelDialog.kind}: ${chosenModel}`);
+        saveModelConfig(modelDialog.kind, chosenModel, modelDialog.agent, runtime?.configDir);
+        setNotice(
+          `Saved model for ${modelDialog.kind} (${normalizeAgentKind(modelDialog.agent)}): ${chosenModel}`,
+        );
         setModelDialog(null);
         return;
       }
@@ -529,29 +535,35 @@ export const App: React.FC<AppProps> = ({
         return;
       }
       if (isCtrlM) {
+        const agentKind = sibling?.agent;
         const currentKind = detailIssue ? ticketKind(detailIssue.labels) : "map";
         const currentModel = getModelForTicketKind(currentKind, {
+          agent: agentKind,
           configDir: runtime?.configDir,
           customModels,
         });
-        const curIdx = AVAILABLE_MODELS.indexOf(currentModel as AvailableModel);
+        const available = getAvailableModels(agentKind);
+        const curIdx = available.indexOf(currentModel);
         setModelDialog({
           kind: currentKind,
+          agent: agentKind,
           issueNumber: detailIssue?.number,
           selectedIndex: curIdx >= 0 ? curIdx : 0,
         });
         return;
       }
       if (isRotateM) {
+        const agentKind = sibling?.agent;
         const currentKind = detailIssue ? ticketKind(detailIssue.labels) : "map";
         const currentModel = getModelForTicketKind(currentKind, {
+          agent: agentKind,
           configDir: runtime?.configDir,
           customModels,
         });
-        const nextModel = getNextModel(currentModel);
+        const nextModel = getNextModel(currentModel, agentKind);
         setCustomModels((prev) => ({ ...prev, [currentKind]: nextModel }));
-        saveModelConfig(currentKind, nextModel, runtime?.configDir);
-        setNotice(`Model for ${currentKind}: ${nextModel}`);
+        saveModelConfig(currentKind, nextModel, agentKind, runtime?.configDir);
+        setNotice(`Model for ${currentKind} (${normalizeAgentKind(agentKind)}): ${nextModel}`);
         return;
       }
       return;
@@ -577,31 +589,37 @@ export const App: React.FC<AppProps> = ({
         return;
       }
       if (isCtrlM) {
+        const agentKind = sibling?.agent;
         const currentIssue = issues[selected];
         const currentKind = currentIssue ? ticketKind(currentIssue.labels) : "map";
         const currentModel = getModelForTicketKind(currentKind, {
+          agent: agentKind,
           configDir: runtime?.configDir,
           customModels,
         });
-        const curIdx = AVAILABLE_MODELS.indexOf(currentModel as AvailableModel);
+        const available = getAvailableModels(agentKind);
+        const curIdx = available.indexOf(currentModel);
         setModelDialog({
           kind: currentKind,
+          agent: agentKind,
           issueNumber: currentIssue?.number,
           selectedIndex: curIdx >= 0 ? curIdx : 0,
         });
         return;
       }
       if (isRotateM) {
+        const agentKind = sibling?.agent;
         const currentIssue = issues[selected];
         const currentKind = currentIssue ? ticketKind(currentIssue.labels) : "map";
         const currentModel = getModelForTicketKind(currentKind, {
+          agent: agentKind,
           configDir: runtime?.configDir,
           customModels,
         });
-        const nextModel = getNextModel(currentModel);
+        const nextModel = getNextModel(currentModel, agentKind);
         setCustomModels((prev) => ({ ...prev, [currentKind]: nextModel }));
-        saveModelConfig(currentKind, nextModel, runtime?.configDir);
-        setNotice(`Model for ${currentKind}: ${nextModel}`);
+        saveModelConfig(currentKind, nextModel, agentKind, runtime?.configDir);
+        setNotice(`Model for ${currentKind} (${normalizeAgentKind(agentKind)}): ${nextModel}`);
         return;
       }
       if (input === "f" || input === "F") {
@@ -762,8 +780,10 @@ export const App: React.FC<AppProps> = ({
       {modelDialog ? (
         <ModelDialog
           kind={modelDialog.kind}
+          agent={modelDialog.agent}
           issueNumber={modelDialog.issueNumber}
           currentModel={getModelForTicketKind(modelDialog.kind, {
+            agent: modelDialog.agent,
             configDir: runtime?.configDir,
             customModels,
           })}

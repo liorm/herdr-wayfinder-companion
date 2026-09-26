@@ -25,7 +25,9 @@ export async function handleWorkMap(
     return { ok: false, message: "No sibling agent target found" };
   }
 
-  const model = options?.model ?? getModelForTicketKind("map", options);
+  const model =
+    options?.model ??
+    getModelForTicketKind("map", { ...options, agent: options?.agent ?? sibling.agent });
 
   const clearCall = await client(["agent", "prompt", target, "/clear"]);
   if (!clearCall.ok) {
@@ -110,6 +112,7 @@ export async function handleWorkDelivery(
     issue,
     sibling,
     client,
+    agent: options?.agent ?? sibling.agent,
     model: options?.model,
     configDir: options?.configDir,
     customModels: options?.customModels,

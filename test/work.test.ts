@@ -185,6 +185,28 @@ describe("dispatchWork", () => {
     ]);
   });
 
+  test("uses agy default model when sibling agent is agy", async () => {
+    const executedCommands: string[][] = [];
+    const mockHerdr = async (args: string[]): Promise<HerdrCall> => {
+      executedCommands.push(args);
+      return { ok: true, status: 0, stdout: "", stderr: "", json: null };
+    };
+
+    const agySibling: SiblingAgent = {
+      paneId: "w1:pA",
+      agent: "agy",
+      status: "idle",
+    };
+
+    const result = await dispatchWork(mapIssue, agySibling, mockHerdr);
+    expect(result.ok).toBe(true);
+    expect(executedCommands).toEqual([
+      ["agent", "prompt", "w1:pA", "/clear"],
+      ["agent", "prompt", "w1:pA", "/model gemini-3.7-flash-medium"],
+      ["agent", "prompt", "w1:pA", "/wayfinder 42"],
+    ]);
+  });
+
   test("fails immediately if sibling agent is not idle", async () => {
     const workingSibling: SiblingAgent = {
       paneId: "w1:pC",

@@ -1,9 +1,10 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { AVAILABLE_MODELS } from "../../wayfinder/models.ts";
+import { getAvailableModels, normalizeAgentKind } from "../../wayfinder/models.ts";
 
 export interface ModelDialogProps {
   kind: string;
+  agent?: string;
   issueNumber?: number;
   currentModel: string;
   selectedIndex: number;
@@ -25,6 +26,7 @@ function centerLine(str: string, len: number): string {
 
 export const ModelDialog: React.FC<ModelDialogProps> = ({
   kind,
+  agent,
   issueNumber,
   currentModel,
   selectedIndex,
@@ -33,8 +35,12 @@ export const ModelDialog: React.FC<ModelDialogProps> = ({
 }) => {
   const dialogWidth = Math.min(Math.max(columns - 4, 38), 54);
   const innerWidth = dialogWidth - 2;
+  const normAgent = normalizeAgentKind(agent);
+  const availableModels = getAvailableModels(normAgent);
 
-  const headerTitle = issueNumber ? `Choose Model: #${issueNumber} (${kind})` : `Choose Model (${kind})`;
+  const headerTitle = issueNumber
+    ? `Choose Model (${normAgent}): #${issueNumber} (${kind})`
+    : `Choose Model (${normAgent}): ${kind}`;
 
   return (
     <Box
@@ -55,7 +61,7 @@ export const ModelDialog: React.FC<ModelDialogProps> = ({
         <Text>{padLine(` \x1b[1;36m[ ${headerTitle} ]\x1b[0m`, innerWidth)}</Text>
         <Text>{padLine("", innerWidth)}</Text>
 
-        {AVAILABLE_MODELS.map((model, idx) => {
+        {availableModels.map((model, idx) => {
           const isHovered = idx === selectedIndex;
           const isActive = model === currentModel;
           const prefix = isHovered ? "❯ " : "  ";
