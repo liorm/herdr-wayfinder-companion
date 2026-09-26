@@ -32,8 +32,16 @@ describe("createInitialDeliverySteps", () => {
     expect(steps.map((s) => s.id)).toEqual(["branch", "clear", "model", "implement", "pr"]);
     expect(steps.every((s) => s.status === "pending")).toBe(true);
     expect(steps[0]?.title).toContain("55-add-payment-gateway-integration");
+    expect(steps[2]?.title).toContain("/model Grok 4.7 low");
     expect(steps[3]?.title).toContain("/implement 55, ask no questions");
     expect(steps[4]?.title).toContain("/commit-push-pr ticket 55");
+  });
+
+  test("uses custom model in step title when provided", () => {
+    const steps = createInitialDeliverySteps(sampleDeliveryIssue, "55-add-payment-gateway-integration", {
+      model: "Claude 3.7 Sonnet high",
+    });
+    expect(steps[2]?.title).toContain("/model Claude 3.7 Sonnet high");
   });
 });
 
@@ -125,6 +133,45 @@ describe("runDeliveryWorkflow", () => {
     expect(executedHerdr).toContainEqual(["agent", "prompt", "w1:pA", "/model Grok 4.7 low"]);
     expect(executedHerdr).toContainEqual(["agent", "prompt", "w1:pA", "/implement 55, ask no questions"]);
     expect(executedHerdr).toContainEqual(["agent", "prompt", "w1:pA", "/commit-push-pr ticket 55"]);
+  });
+
+  test("runs delivery workflow with custom model", async () => {
+    const executedHerdr: string[][] = [];
+
+    const mockHerdr = async (args: string[]): Promise<HerdrCall> => {
+      executedHerdr.push(args);
+      if (args[0] === "agent" && args[1] === "get") {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: { result: { agent: { agent_status: "idle", title: "Done" } } },
+        };
+      }
+      return { ok: true, status: 0, stdout: "", stderr: "", json: null };
+    };
+
+    const mockGit: GitRunner = async () => ({ status: 0, stdout: "", stderr: "" });
+    const mockGh: GhRunner = async () => ({
+      status: 0,
+      stdout: JSON.stringify([{ number: 101, title: "PR", url: "https://github.com/example/repo/pull/101", state: "OPEN" }]),
+      stderr: "",
+    });
+
+    const finalState = await runDeliveryWorkflow({
+      cwd: "/fake/repo",
+      issue: sampleDeliveryIssue,
+      sibling: idleSibling,
+      client: mockHerdr,
+      model: "Claude 3.7 Sonnet medium",
+      runGit: mockGit,
+      runGh: mockGh,
+      pollIntervalMs: 10,
+    });
+
+    expect(finalState.isFinished).toBe(true);
+    expect(executedHerdr).toContainEqual(["agent", "prompt", "w1:pA", "/model Claude 3.7 Sonnet medium"]);
   });
 
   test("handles failure in branch creation", async () => {

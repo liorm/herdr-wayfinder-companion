@@ -2,6 +2,7 @@ import type { Issue } from "../github/issues.ts";
 import { herdrErrorMessage, type HerdrCall } from "../herdr.ts";
 import type { SiblingAgent } from "../sibling.ts";
 import { ticketKind } from "./board.ts";
+import { getModelForTicketKind, type ModelResolutionOptions } from "./models.ts";
 
 export interface WorkResult {
   ok: boolean;
@@ -9,22 +10,29 @@ export interface WorkResult {
   notImplemented?: boolean;
 }
 
+export interface WorkOptions extends ModelResolutionOptions {
+  model?: string;
+}
+
 export async function handleWorkMap(
   issue: Issue,
   sibling: SiblingAgent,
   client: (args: string[]) => Promise<HerdrCall>,
+  options?: WorkOptions,
 ): Promise<WorkResult> {
   const target = sibling.paneId ?? sibling.agent;
   if (!target) {
     return { ok: false, message: "No sibling agent target found" };
   }
 
+  const model = options?.model ?? getModelForTicketKind("map", options);
+
   const clearCall = await client(["agent", "prompt", target, "/clear"]);
   if (!clearCall.ok) {
     return { ok: false, message: `Failed to clear session: ${herdrErrorMessage(clearCall)}` };
   }
 
-  const modelCall = await client(["agent", "prompt", target, "/model Grok 4.7 medium"]);
+  const modelCall = await client(["agent", "prompt", target, `/model ${model}`]);
   if (!modelCall.ok) {
     return { ok: false, message: `Failed to set model: ${herdrErrorMessage(modelCall)}` };
   }
@@ -40,10 +48,19 @@ export async function handleWorkMap(
   };
 }
 
+export interface WorkOptions extends ModelResolutionOptions {
+  model?: string;
+  cwd?: string;
+  runGit?: import("../git.ts").GitRunner;
+  runGh?: import("../github/issues.ts").GhRunner;
+  onUpdate?: (state: import("./delivery.ts").DeliveryState) => void;
+}
+
 export async function handleWorkGrilling(
   _issue: Issue,
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
+  _options?: WorkOptions,
 ): Promise<WorkResult> {
   return { ok: false, notImplemented: true, message: "Work for grilling tickets is not implemented yet" };
 }
@@ -52,6 +69,7 @@ export async function handleWorkResearch(
   _issue: Issue,
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
+  _options?: WorkOptions,
 ): Promise<WorkResult> {
   return { ok: false, notImplemented: true, message: "Work for research tickets is not implemented yet" };
 }
@@ -60,6 +78,7 @@ export async function handleWorkPrototype(
   _issue: Issue,
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
+  _options?: WorkOptions,
 ): Promise<WorkResult> {
   return { ok: false, notImplemented: true, message: "Work for prototype tickets is not implemented yet" };
 }
@@ -68,6 +87,7 @@ export async function handleWorkTask(
   _issue: Issue,
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
+  _options?: WorkOptions,
 ): Promise<WorkResult> {
   return { ok: false, notImplemented: true, message: "Work for task tickets is not implemented yet" };
 }
@@ -76,12 +96,7 @@ export async function handleWorkDelivery(
   issue: Issue,
   sibling: SiblingAgent,
   client: (args: string[]) => Promise<HerdrCall>,
-  options?: {
-    cwd?: string;
-    runGit?: import("../git.ts").GitRunner;
-    runGh?: import("../github/issues.ts").GhRunner;
-    onUpdate?: (state: import("./delivery.ts").DeliveryState) => void;
-  },
+  options?: WorkOptions,
 ): Promise<WorkResult> {
   const target = sibling.paneId ?? sibling.agent;
   if (!target) {
@@ -95,6 +110,9 @@ export async function handleWorkDelivery(
     issue,
     sibling,
     client,
+    model: options?.model,
+    configDir: options?.configDir,
+    customModels: options?.customModels,
     runGit: options?.runGit,
     runGh: options?.runGh,
     onUpdate: options?.onUpdate,
@@ -114,6 +132,7 @@ export async function handleWorkOther(
   _issue: Issue,
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
+  _options?: WorkOptions,
 ): Promise<WorkResult> {
   return { ok: false, notImplemented: true, message: "Work for other tickets is not implemented yet" };
 }
@@ -122,6 +141,7 @@ export async function dispatchWork(
   issue: Issue,
   sibling: SiblingAgent,
   client: (args: string[]) => Promise<HerdrCall>,
+  options?: WorkOptions,
 ): Promise<WorkResult> {
   if (sibling.status !== "idle") {
     const status = sibling.status ? `(${sibling.status})` : "(unavailable)";
@@ -131,19 +151,19 @@ export async function dispatchWork(
   const kind = ticketKind(issue.labels);
   switch (kind) {
     case "map":
-      return handleWorkMap(issue, sibling, client);
+      return handleWorkMap(issue, sibling, client, options);
     case "grilling":
-      return handleWorkGrilling(issue, sibling, client);
+      return handleWorkGrilling(issue, sibling, client, options);
     case "research":
-      return handleWorkResearch(issue, sibling, client);
+      return handleWorkResearch(issue, sibling, client, options);
     case "prototype":
-      return handleWorkPrototype(issue, sibling, client);
+      return handleWorkPrototype(issue, sibling, client, options);
     case "task":
-      return handleWorkTask(issue, sibling, client);
+      return handleWorkTask(issue, sibling, client, options);
     case "delivery":
-      return handleWorkDelivery(issue, sibling, client);
+      return handleWorkDelivery(issue, sibling, client, options);
     case "other":
     default:
-      return handleWorkOther(issue, sibling, client);
+      return handleWorkOther(issue, sibling, client, options);
   }
 }

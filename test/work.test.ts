@@ -167,6 +167,24 @@ describe("dispatchWork", () => {
     ]);
   });
 
+  test("uses custom model when specified for map tickets", async () => {
+    const executedCommands: string[][] = [];
+    const mockHerdr = async (args: string[]): Promise<HerdrCall> => {
+      executedCommands.push(args);
+      return { ok: true, status: 0, stdout: "", stderr: "", json: null };
+    };
+
+    const result = await dispatchWork(mapIssue, idleSibling, mockHerdr, {
+      model: "Claude 3.7 Sonnet high",
+    });
+    expect(result.ok).toBe(true);
+    expect(executedCommands).toEqual([
+      ["agent", "prompt", "w1:pC", "/clear"],
+      ["agent", "prompt", "w1:pC", "/model Claude 3.7 Sonnet high"],
+      ["agent", "prompt", "w1:pC", "/wayfinder 42"],
+    ]);
+  });
+
   test("fails immediately if sibling agent is not idle", async () => {
     const workingSibling: SiblingAgent = {
       paneId: "w1:pC",

@@ -11,6 +11,7 @@ import {
 } from "../git.ts";
 import { herdrErrorMessage, type HerdrCall } from "../herdr.ts";
 import type { SiblingAgent } from "../sibling.ts";
+import { getModelForTicketKind, type ModelResolutionOptions } from "./models.ts";
 
 export type DeliveryStepStatus = "pending" | "running" | "completed" | "failed";
 
@@ -36,7 +37,16 @@ export interface DeliveryState {
   error?: string;
 }
 
-export function createInitialDeliverySteps(issue: Issue, branchName: string): DeliveryStep[] {
+export interface DeliveryStepOptions extends ModelResolutionOptions {
+  model?: string;
+}
+
+export function createInitialDeliverySteps(
+  issue: Issue,
+  branchName: string,
+  options?: DeliveryStepOptions,
+): DeliveryStep[] {
+  const model = options?.model ?? getModelForTicketKind("delivery", options);
   return [
     {
       id: "branch",
@@ -50,7 +60,7 @@ export function createInitialDeliverySteps(issue: Issue, branchName: string): De
     },
     {
       id: "model",
-      title: "Set model to low effort (/model Grok 4.7 low)",
+      title: `Set model to low effort (/model ${model})`,
       status: "pending",
     },
     {
@@ -69,6 +79,7 @@ export function createInitialDeliverySteps(issue: Issue, branchName: string): De
 export function createInitialDeliveryState(
   issue: Issue,
   existingPR?: PRInfo | null,
+  options?: DeliveryStepOptions,
 ): DeliveryState {
   const branchName = formatTicketBranch(issue.number, issue.title);
   const alreadyDelivered = existingPR !== null && existingPR !== undefined;
@@ -80,16 +91,17 @@ export function createInitialDeliveryState(
     isFinished: alreadyDelivered,
     alreadyDelivered,
     existingPR: existingPR ?? undefined,
-    steps: createInitialDeliverySteps(issue, branchName),
+    steps: createInitialDeliverySteps(issue, branchName, options),
     modifiedFiles: [],
   };
 }
 
-export interface DeliveryWorkflowOptions {
+export interface DeliveryWorkflowOptions extends ModelResolutionOptions {
   cwd: string;
   issue: Issue;
   sibling: SiblingAgent;
   client: (args: string[]) => Promise<HerdrCall>;
+  model?: string;
   runGit?: GitRunner;
   runGh?: GhRunner;
   onUpdate?: (state: DeliveryState) => void;
@@ -207,7 +219,8 @@ export async function runDeliveryWorkflow(
 
   // --- Step 3: Set agent model to low effort ---
   setStepStatus("model", "running");
-  const modelCall = await client(["agent", "prompt", target, "/model Grok 4.7 low"]);
+  const model = options.model ?? getModelForTicketKind("delivery", options);
+  const modelCall = await client(["agent", "prompt", target, `/model ${model}`]);
   if (!modelCall.ok) {
     const errorMsg = `Failed to set model: ${herdrErrorMessage(modelCall)}`;
     setStepStatus("model", "failed", errorMsg);
