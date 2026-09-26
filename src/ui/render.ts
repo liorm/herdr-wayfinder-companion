@@ -31,7 +31,15 @@ export interface MessageModel {
   footer: string;
 }
 
-export type PaneModel = ListModel | DetailModel | MessageModel;
+export interface DialogModel {
+  kind: "dialog";
+  title: string;
+  message: string;
+  detail?: string;
+  base?: ListModel | DetailModel;
+}
+
+export type PaneModel = ListModel | DetailModel | MessageModel | DialogModel;
 
 export function reveal(selected: number, scroll: number, windowSize: number): number {
   if (windowSize <= 0) return 0;
@@ -61,7 +69,9 @@ export function renderPane(model: PaneModel, columns: number, rows: number): str
     ? listLines(model, width, height)
     : model.kind === "detail"
       ? detailLines(model, width, height)
-      : messageLines(model, width, height);
+      : model.kind === "message"
+        ? messageLines(model, width, height)
+        : dialogLines(model, width, height);
   let frame = "\x1b[H";
   for (let row = 0; row < height; row++) {
     frame += `\x1b[${row + 1};1H${lines[row] ?? blank(width)}`;
@@ -71,7 +81,7 @@ export function renderPane(model: PaneModel, columns: number, rows: number): str
 
 export function formatAgentDetails(sibling: SiblingAgent): string {
   const agentName = sibling.agent;
-  const status = sibling.status && sibling.status !== "unknown" ? sibling.status : undefined;
+  const status = sibling.status;
   const message = sibling.lastMessage;
 
   let label = "";
@@ -174,6 +184,55 @@ function messageLines(model: MessageModel, columns: number, rows: number): strin
   while (lines.length < rows - 1) lines.push(blank(columns));
   lines.push(pad(clip(model.footer, columns), columns));
   return lines.slice(0, rows);
+}
+
+function dialogLines(model: DialogModel, columns: number, rows: number): string[] {
+  const baseLines = model.base
+    ? (model.base.kind === "list" ? listLines(model.base, columns, rows) : detailLines(model.base, columns, rows))
+    : Array.from({ length: rows }, () => blank(columns));
+
+  const dialogWidth = Math.min(Math.max(columns - 4, 36), 64);
+  const innerWidth = dialogWidth - 2;
+  const left = Math.max(0, Math.floor((columns - dialogWidth) / 2));
+
+  const dialogBoxLines: string[] = [
+    `╭${"─".repeat(innerWidth)}╮`,
+    `│${padLine(` [ ${model.title} ]`, innerWidth)}│`,
+    `│${padLine("", innerWidth)}│`,
+    `│${padLine(`  ╔═════╗  ${model.message}`, innerWidth)}│`,
+    `│${padLine(`  ║  ✖  ║  ${model.detail ?? ""}`, innerWidth)}│`,
+    `│${padLine(`  ╚═════╝`, innerWidth)}│`,
+    `│${padLine("", innerWidth)}│`,
+    `│${centerLine("[ OK ] (Enter or Esc)", innerWidth)}│`,
+    `╰${"─".repeat(innerWidth)}╯`,
+  ];
+
+  const top = Math.max(0, Math.floor((rows - dialogBoxLines.length) / 2));
+  const output: string[] = [...baseLines];
+
+  for (let i = 0; i < dialogBoxLines.length; i++) {
+    const rowIdx = top + i;
+    if (rowIdx >= rows) break;
+    const baseLine = output[rowIdx] ?? blank(columns);
+    const dialogLine = dialogBoxLines[i] ?? "";
+    const before = [...baseLine].slice(0, left).join("");
+    const after = [...baseLine].slice(left + dialogWidth).join("");
+    output[rowIdx] = pad(before + dialogLine + after, columns);
+  }
+
+  return output.slice(0, rows);
+}
+
+function padLine(str: string, len: number): string {
+  const visible = [...str.replace(/\x1b\[[0-9;]*m/g, "")].length;
+  return str + " ".repeat(Math.max(0, len - visible));
+}
+
+function centerLine(str: string, len: number): string {
+  const visible = [...str.replace(/\x1b\[[0-9;]*m/g, "")].length;
+  const left = Math.max(0, Math.floor((len - visible) / 2));
+  const right = Math.max(0, len - visible - left);
+  return " ".repeat(left) + str + " ".repeat(right);
 }
 
 function rowText(row: BoardRow, width: number): string {

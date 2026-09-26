@@ -143,6 +143,50 @@ describe("renderPane", () => {
     );
     expect(plainRows(scrolled).slice(0, -1).join("\n")).toContain("paragraph 39");
   });
+
+  test("dialog view renders error title, ASCII icon, message, and dismiss hint", () => {
+    const frame = renderPane(
+      {
+        kind: "dialog",
+        title: "Not Implemented",
+        message: "Work for grilling tickets is not implemented yet.",
+        detail: "Please check back later",
+      },
+      80,
+      10,
+    );
+    expect(frame).toContain("Not Implemented");
+    expect(frame).toContain("╔═════╗");
+    expect(frame).toContain("║  ✖  ║");
+    expect(frame).toContain("Work for grilling tickets is not implemented yet.");
+    expect(frame).toContain("Please check back later");
+    expect(frame).toContain("[ OK ] (Enter or Esc)");
+  });
+
+  test("dialog view overlays the base background view without replacing it", () => {
+    const list: ListModel = {
+      kind: "list",
+      repo: "acme/widgets",
+      state: "open",
+      issues: [issue],
+      selected: 0,
+      scroll: 0,
+    };
+    const frame = renderPane(
+      {
+        kind: "dialog",
+        title: "Not Implemented",
+        message: "Work for grilling tickets is not implemented yet.",
+        base: list,
+      },
+      80,
+      12,
+    );
+    expect(frame).toContain("acme/widgets");
+    expect(frame).toContain("Wayfinder Companion");
+    expect(frame).toContain("Not Implemented");
+    expect(frame).toContain("║  ✖  ║");
+  });
 });
 
 function plainRows(frame: string): string[] {

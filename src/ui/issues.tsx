@@ -10,13 +10,11 @@ import {
 } from "../github/cache.ts";
 import { formatPlainIssues } from "./render.ts";
 import { readRuntime, type PluginRuntime } from "../runtime.ts";
-import { hasSiblingAgent, resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
+import { resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
 import { App } from "./App.tsx";
 
 const MISSING_DIRECTORY =
   "No workspace directory in the Herdr context. Open Wayfinder Companion from a workspace.";
-const NO_AGENT_FOUND =
-  "No sibling agent found in the current tab. Open Wayfinder Companion alongside a coding agent.";
 
 export interface IssuePaneOptions {
   onClose?: () => Promise<void>;
@@ -57,21 +55,14 @@ export async function runIssuePane(
       return await renderMessage("Wayfinder Companion", [MISSING_DIRECTORY], 1);
     }
 
-    const sibling = await fetchSibling(runtime).catch(() => undefined);
-    if (!hasSiblingAgent(sibling)) {
-      if (!process.stdin.isTTY || !process.stdout.isTTY) {
-        console.error(NO_AGENT_FOUND);
-        return 1;
-      }
-      return await renderMessage("Wayfinder Companion", [NO_AGENT_FOUND], 1);
-    }
-
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      const sibling = await fetchSibling(runtime).catch(() => undefined);
       return await printIssues(cwd, sibling, runtime);
     }
 
     const cached = getCachedIssues(cwd, "open", runtime.stateDir);
     if (cached) {
+      const sibling = await fetchSibling(runtime).catch(() => undefined);
       return await startInkApp({
         cwd,
         initialRepo: cached.repo,
@@ -85,7 +76,10 @@ export async function runIssuePane(
       });
     }
 
-    const loaded = await loadIssues(cwd, "open");
+    const [loaded, sibling] = await Promise.all([
+      loadIssues(cwd, "open"),
+      fetchSibling(runtime).catch(() => undefined),
+    ]);
 
     if (!loaded.ok) {
       return await renderMessage("Wayfinder Companion", loaded.message.split("\n"), 1);

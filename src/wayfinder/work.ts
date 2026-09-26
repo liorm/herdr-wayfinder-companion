@@ -6,6 +6,7 @@ import { ticketKind } from "./board.ts";
 export interface WorkResult {
   ok: boolean;
   message: string;
+  notImplemented?: boolean;
 }
 
 export async function handleWorkMap(
@@ -44,7 +45,7 @@ export async function handleWorkGrilling(
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
 ): Promise<WorkResult> {
-  return { ok: false, message: "Work for grilling tickets is not implemented yet" };
+  return { ok: false, notImplemented: true, message: "Work for grilling tickets is not implemented yet" };
 }
 
 export async function handleWorkResearch(
@@ -52,7 +53,7 @@ export async function handleWorkResearch(
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
 ): Promise<WorkResult> {
-  return { ok: false, message: "Work for research tickets is not implemented yet" };
+  return { ok: false, notImplemented: true, message: "Work for research tickets is not implemented yet" };
 }
 
 export async function handleWorkPrototype(
@@ -60,7 +61,7 @@ export async function handleWorkPrototype(
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
 ): Promise<WorkResult> {
-  return { ok: false, message: "Work for prototype tickets is not implemented yet" };
+  return { ok: false, notImplemented: true, message: "Work for prototype tickets is not implemented yet" };
 }
 
 export async function handleWorkTask(
@@ -68,7 +69,7 @@ export async function handleWorkTask(
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
 ): Promise<WorkResult> {
-  return { ok: false, message: "Work for task tickets is not implemented yet" };
+  return { ok: false, notImplemented: true, message: "Work for task tickets is not implemented yet" };
 }
 
 export async function handleWorkDelivery(
@@ -76,7 +77,7 @@ export async function handleWorkDelivery(
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
 ): Promise<WorkResult> {
-  return { ok: false, message: "Work for delivery tickets is not implemented yet" };
+  return { ok: false, notImplemented: true, message: "Work for delivery tickets is not implemented yet" };
 }
 
 export async function handleWorkOther(
@@ -84,7 +85,7 @@ export async function handleWorkOther(
   _sibling: SiblingAgent,
   _client: (args: string[]) => Promise<HerdrCall>,
 ): Promise<WorkResult> {
-  return { ok: false, message: "Work for other tickets is not implemented yet" };
+  return { ok: false, notImplemented: true, message: "Work for other tickets is not implemented yet" };
 }
 
 export async function dispatchWork(

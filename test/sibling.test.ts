@@ -2,25 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   cleanTerminalTitle,
   extractAgentMessageFromOutput,
-  hasSiblingAgent,
   resolveSiblingAgent,
 } from "../src/sibling.ts";
 import { collectStatus } from "../src/commands.ts";
 import type { PluginRuntime } from "../src/runtime.ts";
-
-describe("hasSiblingAgent", () => {
-  test("returns true when agent or status is defined", () => {
-    expect(hasSiblingAgent({ agent: "grok", status: "idle" })).toBe(true);
-    expect(hasSiblingAgent({ agent: "claude" })).toBe(true);
-    expect(hasSiblingAgent({ status: "working" })).toBe(true);
-  });
-
-  test("returns false when agent and status are undefined", () => {
-    expect(hasSiblingAgent(undefined)).toBe(false);
-    expect(hasSiblingAgent({})).toBe(false);
-    expect(hasSiblingAgent({ paneId: "w1:p1", lastMessage: "hello" })).toBe(false);
-  });
-});
 
 describe("cleanTerminalTitle", () => {
   test("removes agent suffix from terminal title", () => {
@@ -289,60 +274,6 @@ describe("resolveSiblingAgent", () => {
     expect(sibling?.agent).toBe("gemini");
     expect(sibling?.status).toBe("working");
     expect(sibling?.lastMessage).toBe("Fixing edge cases");
-  });
-
-  test("returns undefined when tab only contains plain shell panes without agents", async () => {
-    const plainShellRuntime: PluginRuntime = {
-      pluginId: "wayfinder.companion",
-      binPath: "herdr",
-      paneId: "w1:companion_pane",
-      tabId: "w1:t1",
-      context: { raw: {} },
-    };
-
-    const mockHerdr = async (args: string[]): Promise<any> => {
-      const cmd = args.join(" ");
-      if (cmd.includes("pane list")) {
-        return {
-          ok: true,
-          status: 0,
-          stdout: "",
-          stderr: "",
-          json: {
-            result: {
-              panes: [
-                { pane_id: "w1:p_shell1", tab_id: "w1:t1", agent_status: "unknown" },
-                { pane_id: "w1:p_shell2", tab_id: "w1:t1", agent_status: "unknown" },
-                { pane_id: "w1:companion_pane", tab_id: "w1:t1", agent_status: "unknown" },
-              ],
-            },
-          },
-        };
-      }
-      if (cmd.includes("agent list")) {
-        return {
-          ok: true,
-          status: 0,
-          stdout: "",
-          stderr: "",
-          json: { result: { agents: [] } },
-        };
-      }
-      if (cmd.includes("pane neighbor")) {
-        return {
-          ok: true,
-          status: 0,
-          stdout: "",
-          stderr: "",
-          json: { result: { neighbor: { neighbor_pane_id: "w1:p_shell1" } } },
-        };
-      }
-      return { ok: false, status: 1, stdout: "", stderr: "", json: null };
-    };
-
-    const sibling = await resolveSiblingAgent(plainShellRuntime, mockHerdr);
-    expect(sibling).toBeUndefined();
-    expect(hasSiblingAgent(sibling)).toBe(false);
   });
 });
 

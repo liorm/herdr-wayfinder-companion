@@ -254,4 +254,29 @@ describe("dispatchWork", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toContain("Failed to set model: model switch failed");
   });
+
+  test("notImplemented is true for unimplemented ticket types", async () => {
+    const mockHerdr = async (): Promise<HerdrCall> => ({ ok: true, status: 0, stdout: "", stderr: "", json: null });
+    const res = await dispatchWork(grillingIssue, idleSibling, mockHerdr);
+    expect(res.notImplemented).toBe(true);
+  });
+});
+
+describe("createErrorDialog", () => {
+  test("creates a dialog state object with title, message, and optional detail", () => {
+    const { createErrorDialog } = require("../src/ui/dialog.ts");
+    const dialog = createErrorDialog("Something went wrong", "Custom Error", "Detail message");
+    expect(dialog).toEqual({
+      title: "Custom Error",
+      message: "Something went wrong",
+      detail: "Detail message",
+    });
+
+    const defaultDialog = createErrorDialog("Generic failure");
+    expect(defaultDialog).toEqual({
+      title: "Error",
+      message: "Generic failure",
+      detail: undefined,
+    });
+  });
 });

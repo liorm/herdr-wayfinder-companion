@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useApp, useInput, useStdout } from "ink";
+import { Box, useApp, useInput, useStdout } from "ink";
 import {
   loadIssueView,
   nextIssueState,
@@ -17,6 +17,8 @@ import { formatTicketView } from "./ticket.ts";
 import { ListView } from "./components/ListView.tsx";
 import { DetailView } from "./components/DetailView.tsx";
 import { MessageView } from "./components/MessageView.tsx";
+import { ErrorDialog } from "./components/ErrorDialog.tsx";
+import { createErrorDialog, type DialogState } from "./dialog.ts";
 import { refreshBoardState } from "./issues.tsx";
 
 export interface AppProps {
@@ -31,6 +33,7 @@ export interface AppProps {
     lines: string[];
     footer?: string;
   };
+  initialError?: DialogState;
   runtime?: PluginRuntime;
   refreshIntervalMs?: number;
   fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
@@ -45,6 +48,7 @@ export const App: React.FC<AppProps> = ({
   initialSibling,
   initialRefresh = false,
   initialMessage,
+  initialError,
   runtime,
   refreshIntervalMs = 5000,
   fetchSibling = resolveSiblingAgent,
@@ -84,6 +88,11 @@ export const App: React.FC<AppProps> = ({
   const [scroll, setScroll] = useState(0);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [sibling, setSibling] = useState<SiblingAgent | undefined>(initialSibling);
+  const [errorDialog, setErrorDialog] = useState<DialogState | null>(initialError ?? null);
+
+  const showError = useCallback((message: string, title: string = "Error", detail?: string) => {
+    setErrorDialog(createErrorDialog(message, title, detail));
+  }, []);
 
   // Detail view state
   const [detailIssue, setDetailIssue] = useState<Issue | null>(null);
@@ -217,6 +226,23 @@ export const App: React.FC<AppProps> = ({
       exit();
       return;
     }
+
+    if (errorDialog) {
+      if (
+        key.return ||
+        key.escape ||
+        input === " " ||
+        input === "o" ||
+        input === "O" ||
+        input === "q" ||
+        input === "Q"
+      ) {
+        setErrorDialog(null);
+        return;
+      }
+      return;
+    }
+
     if (input === "q" || input === "Q") {
       exit();
       return;
@@ -259,18 +285,24 @@ export const App: React.FC<AppProps> = ({
       if (input === "w" || input === "W") {
         if (!detailIssue) return;
         if (isIssueBlocked(detailIssue, issues)) {
-          setNotice(`Ticket #${detailIssue.number} is blocked.`);
+          showError(`Ticket #${detailIssue.number} is blocked.`, "Action Blocked");
           return;
         }
         if (!sibling || sibling.status !== "idle") {
-          const statusText = sibling?.status ? ` (${sibling.status})` : "";
-          setNotice(`Agent is not idle${statusText}.`);
+          const statusText = sibling?.status ? ` (${sibling.status})` : " (unavailable)";
+          showError(`Agent is not idle${statusText}.`, "Agent Busy");
           return;
         }
         setNotice(`Starting work on #${detailIssue.number}…`);
         const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
         const result = await dispatchWork(detailIssue, sibling, client);
-        setNotice(result.message);
+        if (result.notImplemented) {
+          showError(result.message, "Not Implemented");
+        } else if (!result.ok) {
+          showError(result.message, "Error");
+        } else {
+          setNotice(result.message);
+        }
         return;
       }
       return;
@@ -293,18 +325,24 @@ export const App: React.FC<AppProps> = ({
         const currentIssue = issues[selected];
         if (!currentIssue) return;
         if (isIssueBlocked(currentIssue, issues)) {
-          setNotice(`Ticket #${currentIssue.number} is blocked.`);
+          showError(`Ticket #${currentIssue.number} is blocked.`, "Action Blocked");
           return;
         }
         if (!sibling || sibling.status !== "idle") {
-          const statusText = sibling?.status ? ` (${sibling.status})` : "";
-          setNotice(`Agent is not idle${statusText}.`);
+          const statusText = sibling?.status ? ` (${sibling.status})` : " (unavailable)";
+          showError(`Agent is not idle${statusText}.`, "Agent Busy");
           return;
         }
         setNotice(`Starting work on #${currentIssue.number}…`);
         const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
         const result = await dispatchWork(currentIssue, sibling, client);
-        setNotice(result.message);
+        if (result.notImplemented) {
+          showError(result.message, "Not Implemented");
+        } else if (!result.ok) {
+          showError(result.message, "Error");
+        } else {
+          setNotice(result.message);
+        }
         return;
       }
       if (input === "f" || input === "F") {
@@ -396,40 +434,46 @@ export const App: React.FC<AppProps> = ({
     }
   });
 
-  if (mode === "message" && message) {
-    return (
-      <MessageView
-        title={message.title}
-        lines={message.lines}
-        footer={message.footer}
-        columns={dimensions.columns}
-        rows={dimensions.rows}
-      />
-    );
-  }
-
-  if (mode === "detail" && detailIssue) {
-    return (
-      <DetailView
-        lines={detailLines}
-        scroll={detailScroll}
-        columns={dimensions.columns}
-        rows={dimensions.rows}
-      />
-    );
-  }
-
   return (
-    <ListView
-      repo={repo}
-      state={state}
-      issues={issues}
-      selected={selected}
-      scroll={scroll}
-      notice={notice}
-      sibling={sibling}
-      columns={dimensions.columns}
-      rows={dimensions.rows}
-    />
+    <Box width={dimensions.columns} height={dimensions.rows} position="relative">
+      {mode === "message" && message ? (
+        <MessageView
+          title={message.title}
+          lines={message.lines}
+          footer={message.footer}
+          columns={dimensions.columns}
+          rows={dimensions.rows}
+        />
+      ) : mode === "detail" && detailIssue ? (
+        <DetailView
+          lines={detailLines}
+          scroll={detailScroll}
+          columns={dimensions.columns}
+          rows={dimensions.rows}
+        />
+      ) : (
+        <ListView
+          repo={repo}
+          state={state}
+          issues={issues}
+          selected={selected}
+          scroll={scroll}
+          notice={notice}
+          sibling={sibling}
+          columns={dimensions.columns}
+          rows={dimensions.rows}
+        />
+      )}
+
+      {errorDialog ? (
+        <ErrorDialog
+          title={errorDialog.title}
+          message={errorDialog.message}
+          detail={errorDialog.detail}
+          columns={dimensions.columns}
+          rows={dimensions.rows}
+        />
+      ) : null}
+    </Box>
   );
 };
