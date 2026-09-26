@@ -1,10 +1,10 @@
 import type { Issue } from "../github/issues.ts";
 import { defaultGh, type GhRunner } from "../github/issues.ts";
 import {
-  findTicketPR,
   formatTicketBranch,
   getModifiedFiles,
   prepareDeliveryBranch,
+  waitForTicketPR,
   type GitRunner,
   type ModifiedFile,
   type PRInfo,
@@ -108,6 +108,7 @@ export interface DeliveryWorkflowOptions extends ModelResolutionOptions {
   pollIntervalMs?: number;
   maxWaitMs?: number;
   startupGraceMs?: number;
+  prMaxWaitMs?: number;
 }
 
 export async function waitForAgentIdle(
@@ -426,18 +427,35 @@ export async function runDeliveryWorkflow(
     return state;
   }
 
-  // Fetch created PR
-  const createdPR = await findTicketPR(cwd, issue.number, branchName, runGh);
+  // Wait until the PR is really available on GitHub
+  update({ agentMessage: "Waiting for PR to be available on GitHub..." });
+  const prMaxWait =
+    options.prMaxWaitMs ?? (options.maxWaitMs !== undefined ? options.maxWaitMs : 20_000);
+  const createdPR = await waitForTicketPR(
+    cwd,
+    issue.number,
+    branchName,
+    runGh,
+    prMaxWait,
+    pollIntervalMs,
+    () => {
+      update({ agentMessage: "Waiting for PR to be available on GitHub..." });
+    },
+  );
+
+  if (!createdPR) {
+    const errorMsg = `PR was not found on GitHub after delivery completed for ticket #${issue.number}`;
+    setStepStatus("pr", "failed", errorMsg);
+    update({ error: errorMsg, isFinished: true, currentStepId: undefined });
+    return state;
+  }
+
   setStepStatus("pr", "completed");
 
   update({
     isFinished: true,
-    pr: createdPR ?? {
-      number: 0,
-      title: `PR for #${issue.number}`,
-      url: `https://github.com/pulls`,
-      state: "open",
-    },
+    pr: createdPR,
+    agentMessage: undefined,
     currentStepId: undefined,
   });
 

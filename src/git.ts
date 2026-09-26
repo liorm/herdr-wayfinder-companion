@@ -254,48 +254,24 @@ export async function findTicketPR(
   branchName?: string,
   runGh: GhRunner = defaultGh,
 ): Promise<PRInfo | null> {
-  // 1. If branchName is known, query gh pr list by head branch
-  if (branchName) {
-    const byBranch = await runGh(
-      ["pr", "list", "--head", branchName, "--state", "all", "--json", "number,title,url,state,headRefName", "--limit", "1"],
-      cwd,
-    );
-    if (byBranch.status === 0) {
-      try {
-        const parsed = JSON.parse(byBranch.stdout) as unknown[];
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]) {
-          const pr = parsed[0] as Record<string, unknown>;
-          return {
-            number: Number(pr.number),
-            title: String(pr.title ?? ""),
-            url: String(pr.url ?? ""),
-            state: String(pr.state ?? "").toLowerCase(),
-            headRefName: pr.headRefName ? String(pr.headRefName) : undefined,
-          };
-        }
-      } catch {
-        // ignore parse error
-      }
-    }
-  }
-
-  // 2. Search for PRs referencing the issue number in title or search
-  const bySearch = await runGh(
-    ["pr", "list", "--search", `${issueNumber} in:title`, "--state", "all", "--json", "number,title,url,state,headRefName", "--limit", "5"],
+  // 1. Try gh pr view for the current checked-out branch
+  const viewResult = await runGh(
+    ["pr", "view", "--json", "number,title,url,state,headRefName"],
     cwd,
   );
-  if (bySearch.status === 0) {
+  if (viewResult.status === 0 && viewResult.stdout.trim()) {
     try {
-      const parsed = JSON.parse(bySearch.stdout) as unknown[];
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          const pr = item as Record<string, unknown>;
+      const parsed = JSON.parse(viewResult.stdout) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const pr = parsed as Record<string, unknown>;
+        if (pr.number && Number(pr.number) > 0) {
           const title = String(pr.title ?? "");
           const headRef = pr.headRefName ? String(pr.headRefName) : "";
-          // Check if PR references ticket number as #XX or starts with XX-
           const matchesTicket =
-            new RegExp(`(#|\\b)${issueNumber}\\b`).test(title) ||
-            headRef.startsWith(`${issueNumber}-`);
+            (branchName && headRef === branchName) ||
+            headRef.startsWith(`${issueNumber}-`) ||
+            headRef === String(issueNumber) ||
+            new RegExp(`(#|\\b)${issueNumber}\\b`).test(title);
           if (matchesTicket) {
             return {
               number: Number(pr.number),
@@ -312,6 +288,134 @@ export async function findTicketPR(
     }
   }
 
+  // 2. If branchName is known, query gh pr list by head branch
+  if (branchName) {
+    const byBranch = await runGh(
+      ["pr", "list", "--head", branchName, "--state", "all", "--json", "number,title,url,state,headRefName", "--limit", "1"],
+      cwd,
+    );
+    if (byBranch.status === 0) {
+      try {
+        const parsed = JSON.parse(byBranch.stdout) as unknown[];
+        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]) {
+          const pr = parsed[0] as Record<string, unknown>;
+          if (pr.number && Number(pr.number) > 0) {
+            return {
+              number: Number(pr.number),
+              title: String(pr.title ?? ""),
+              url: String(pr.url ?? ""),
+              state: String(pr.state ?? "").toLowerCase(),
+              headRefName: pr.headRefName ? String(pr.headRefName) : undefined,
+            };
+          }
+        }
+      } catch {
+        // ignore parse error
+      }
+    }
+  }
+
+  // 3. Query recent PRs in the repository directly (no search index delay)
+  const recentPRs = await runGh(
+    ["pr", "list", "--state", "all", "--limit", "30", "--json", "number,title,url,state,headRefName"],
+    cwd,
+  );
+  if (recentPRs.status === 0) {
+    try {
+      const parsed = JSON.parse(recentPRs.stdout) as unknown[];
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          const pr = item as Record<string, unknown>;
+          if (!pr || !pr.number || Number(pr.number) <= 0) continue;
+          const title = String(pr.title ?? "");
+          const headRef = pr.headRefName ? String(pr.headRefName) : "";
+          const matchesTicket =
+            (branchName && headRef === branchName) ||
+            headRef.startsWith(`${issueNumber}-`) ||
+            headRef === String(issueNumber) ||
+            new RegExp(`(#|\\b)${issueNumber}\\b`).test(title);
+          if (matchesTicket) {
+            return {
+              number: Number(pr.number),
+              title,
+              url: String(pr.url ?? ""),
+              state: String(pr.state ?? "").toLowerCase(),
+              headRefName: headRef || undefined,
+            };
+          }
+        }
+      }
+    } catch {
+      // ignore parse error
+    }
+  }
+
+  // 4. Search for PRs referencing the issue number
+  const bySearch = await runGh(
+    ["pr", "list", "--search", `${issueNumber}`, "--state", "all", "--json", "number,title,url,state,headRefName", "--limit", "10"],
+    cwd,
+  );
+  if (bySearch.status === 0) {
+    try {
+      const parsed = JSON.parse(bySearch.stdout) as unknown[];
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          const pr = item as Record<string, unknown>;
+          if (!pr || !pr.number || Number(pr.number) <= 0) continue;
+          const title = String(pr.title ?? "");
+          const headRef = pr.headRefName ? String(pr.headRefName) : "";
+          const matchesTicket =
+            (branchName && headRef === branchName) ||
+            headRef.startsWith(`${issueNumber}-`) ||
+            headRef === String(issueNumber) ||
+            new RegExp(`(#|\\b)${issueNumber}\\b`).test(title);
+          if (matchesTicket) {
+            return {
+              number: Number(pr.number),
+              title,
+              url: String(pr.url ?? ""),
+              state: String(pr.state ?? "").toLowerCase(),
+              headRefName: headRef || undefined,
+            };
+          }
+        }
+      }
+    } catch {
+      // ignore parse error
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Polls for an existing PR associated with a ticket or branch until found or timeout.
+ */
+export async function waitForTicketPR(
+  cwd: string,
+  issueNumber: number,
+  branchName?: string,
+  runGh: GhRunner = defaultGh,
+  maxWaitMs = 15_000,
+  pollIntervalMs = 1_000,
+  onPoll?: () => void | Promise<void>,
+): Promise<PRInfo | null> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const pr = await findTicketPR(cwd, issueNumber, branchName, runGh);
+    if (pr && pr.number > 0 && pr.url) {
+      return pr;
+    }
+    if (onPoll) {
+      await onPoll();
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  // Try one final check
+  const finalPR = await findTicketPR(cwd, issueNumber, branchName, runGh);
+  if (finalPR && finalPR.number > 0 && finalPR.url) {
+    return finalPR;
+  }
   return null;
 }
 

@@ -9,6 +9,7 @@ import {
   matchPullRequestsToIssues,
   parseGitStatus,
   prepareDeliveryBranch,
+  waitForTicketPR,
   type GitRunner,
 } from "../src/git.ts";
 import type { GhRunner } from "../src/github/issues.ts";
@@ -169,8 +170,35 @@ describe("prepareDeliveryBranch", () => {
 });
 
 describe("findTicketPR", () => {
+  test("finds PR via pr view on current branch", async () => {
+    const mockGh: GhRunner = async (args) => {
+      if (args.includes("view")) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            number: 171,
+            title: "Implement feature #171",
+            url: "https://github.com/org/repo/pull/171",
+            state: "OPEN",
+            headRefName: "171-feature",
+          }),
+          stderr: "",
+        };
+      }
+      return { status: 0, stdout: "[]", stderr: "" };
+    };
+
+    const pr = await findTicketPR("/fake/repo", 171, "171-feature", mockGh);
+    expect(pr).not.toBeNull();
+    expect(pr?.number).toBe(171);
+    expect(pr?.url).toBe("https://github.com/org/repo/pull/171");
+  });
+
   test("finds PR by head branch", async () => {
     const mockGh: GhRunner = async (args) => {
+      if (args.includes("view")) {
+        return { status: 1, stdout: "", stderr: "no pull requests found" };
+      }
       if (args.includes("--head")) {
         return {
           status: 0,
@@ -195,9 +223,38 @@ describe("findTicketPR", () => {
     expect(pr?.url).toBe("https://github.com/org/repo/pull/123");
   });
 
-  test("finds PR by ticket search if head branch not matched", async () => {
+  test("finds PR by recent PR list", async () => {
     const mockGh: GhRunner = async (args) => {
-      if (args.includes("--head")) {
+      if (args.includes("view") || args.includes("--head")) {
+        return { status: 1, stdout: "", stderr: "no pr" };
+      }
+      if (args.includes("--limit") && args.includes("30")) {
+        return {
+          status: 0,
+          stdout: JSON.stringify([
+            {
+              number: 789,
+              title: "Fix bug for #55",
+              url: "https://github.com/org/repo/pull/789",
+              state: "OPEN",
+              headRefName: "other-branch",
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      return { status: 0, stdout: "[]", stderr: "" };
+    };
+
+    const pr = await findTicketPR("/fake/repo", 55, "55-something", mockGh);
+    expect(pr).not.toBeNull();
+    expect(pr?.number).toBe(789);
+    expect(pr?.title).toBe("Fix bug for #55");
+  });
+
+  test("finds PR by ticket search if head branch and list not matched", async () => {
+    const mockGh: GhRunner = async (args) => {
+      if (args.includes("view") || args.includes("--head") || (args.includes("--limit") && args.includes("30"))) {
         return { status: 0, stdout: "[]", stderr: "" };
       }
       if (args.includes("--search")) {
@@ -222,6 +279,63 @@ describe("findTicketPR", () => {
     expect(pr).not.toBeNull();
     expect(pr?.number).toBe(456);
     expect(pr?.state).toBe("merged");
+  });
+});
+
+describe("waitForTicketPR", () => {
+  test("waits until PR becomes available after multiple poll attempts", async () => {
+    let pollAttempts = 0;
+    const mockGh: GhRunner = async (args) => {
+      // Count when a full findTicketPR cycle starts (pr view is the first call)
+      if (args.includes("view")) {
+        pollAttempts++;
+      }
+      if (pollAttempts < 3) {
+        return { status: 1, stdout: "", stderr: "no pr yet" };
+      }
+      return {
+        status: 0,
+        stdout: JSON.stringify([
+          {
+            number: 200,
+            title: "PR for #99",
+            url: "https://github.com/org/repo/pull/200",
+            state: "OPEN",
+            headRefName: "99-branch",
+          },
+        ]),
+        stderr: "",
+      };
+    };
+
+    let pollCallbacks = 0;
+    const pr = await waitForTicketPR(
+      "/fake/repo",
+      99,
+      "99-branch",
+      mockGh,
+      500,
+      10,
+      () => {
+        pollCallbacks++;
+      },
+    );
+
+    expect(pr).not.toBeNull();
+    expect(pr?.number).toBe(200);
+    expect(pollAttempts).toBeGreaterThanOrEqual(3);
+    expect(pollCallbacks).toBeGreaterThanOrEqual(2);
+  });
+
+  test("returns null if PR is not found within timeout", async () => {
+    const mockGh: GhRunner = async () => ({
+      status: 1,
+      stdout: "",
+      stderr: "not found",
+    });
+
+    const pr = await waitForTicketPR("/fake/repo", 99, "99-branch", mockGh, 30, 10);
+    expect(pr).toBeNull();
   });
 });
 

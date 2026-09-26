@@ -388,4 +388,100 @@ describe("runDeliveryWorkflow", () => {
     expect(state.error).toContain("Agent is blocked");
     expect(state.steps[1]?.status).toBe("failed");
   });
+
+  test("waits and polls for PR until it appears on GitHub", async () => {
+    const mockHerdr = async (args: string[]): Promise<HerdrCall> => {
+      if (args[0] === "agent" && args[1] === "get") {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: { result: { agent: { agent_status: "idle", title: "Done" } } },
+        };
+      }
+      return { ok: true, status: 0, stdout: "", stderr: "", json: null };
+    };
+
+    const mockGit: GitRunner = async () => ({ status: 0, stdout: "", stderr: "" });
+
+    let ghCallCount = 0;
+    const mockGh: GhRunner = async () => {
+      ghCallCount++;
+      // Return not found for the first 2 queries
+      if (ghCallCount <= 2) {
+        return { status: 1, stdout: "", stderr: "no PR found" };
+      }
+      return {
+        status: 0,
+        stdout: JSON.stringify([
+          {
+            number: 350,
+            title: "PR for #55",
+            url: "https://github.com/example/repo/pull/350",
+            state: "OPEN",
+            headRefName: "55-add-payment-gateway-integration",
+          },
+        ]),
+        stderr: "",
+      };
+    };
+
+    const state = await runDeliveryWorkflow({
+      cwd: "/fake/repo",
+      issue: sampleDeliveryIssue,
+      sibling: idleSibling,
+      client: mockHerdr,
+      runGit: mockGit,
+      runGh: mockGh,
+      pollIntervalMs: 10,
+      prMaxWaitMs: 500,
+    });
+
+    expect(state.isFinished).toBe(true);
+    expect(state.error).toBeUndefined();
+    expect(state.steps[4]?.status).toBe("completed");
+    expect(state.pr).toBeDefined();
+    expect(state.pr?.number).toBe(350);
+    expect(state.pr?.url).toBe("https://github.com/example/repo/pull/350");
+    expect(ghCallCount).toBeGreaterThanOrEqual(3);
+  });
+
+  test("marks step as failed and does not create dummy PR when PR cannot be found", async () => {
+    const mockHerdr = async (args: string[]): Promise<HerdrCall> => {
+      if (args[0] === "agent" && args[1] === "get") {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: { result: { agent: { agent_status: "idle", title: "Done" } } },
+        };
+      }
+      return { ok: true, status: 0, stdout: "", stderr: "", json: null };
+    };
+
+    const mockGit: GitRunner = async () => ({ status: 0, stdout: "", stderr: "" });
+    const mockFailingGh: GhRunner = async () => ({
+      status: 1,
+      stdout: "",
+      stderr: "no pull requests found",
+    });
+
+    const state = await runDeliveryWorkflow({
+      cwd: "/fake/repo",
+      issue: sampleDeliveryIssue,
+      sibling: idleSibling,
+      client: mockHerdr,
+      runGit: mockGit,
+      runGh: mockFailingGh,
+      pollIntervalMs: 10,
+      prMaxWaitMs: 30,
+    });
+
+    expect(state.isFinished).toBe(true);
+    expect(state.error).toContain("PR was not found on GitHub");
+    expect(state.steps[4]?.status).toBe("failed");
+    expect(state.pr).toBeUndefined();
+  });
 });

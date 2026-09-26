@@ -188,7 +188,7 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
               </Text>
             ) : null}
 
-            {isFinished && pr ? (
+            {isFinished && pr && pr.number > 0 ? (
               <Box flexDirection="column">
                 <Text>{padLine("", innerWidth)}</Text>
                 <Text>
