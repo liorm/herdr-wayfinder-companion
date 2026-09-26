@@ -87,10 +87,17 @@ describe("runDeliveryWorkflow", () => {
       return { ok: true, status: 0, stdout: "", stderr: "", json: null };
     };
 
+    let branchPrepared = false;
     const mockGit: GitRunner = async (args) => {
       executedGit.push(args);
       if (args[0] === "status") {
+        if (!branchPrepared) {
+          return { status: 0, stdout: "", stderr: "" };
+        }
         return { status: 0, stdout: " M src/payments.ts\n?? src/gateway.ts\n", stderr: "" };
+      }
+      if (args[0] === "checkout") {
+        branchPrepared = true;
       }
       return { status: 0, stdout: "", stderr: "" };
     };
@@ -238,6 +245,29 @@ describe("runDeliveryWorkflow", () => {
 
     expect(state.isFinished).toBe(true);
     expect(state.error).toContain("Failed to checkout main");
+    expect(state.steps[0]?.status).toBe("failed");
+  });
+
+  test("fails fast if working tree has uncommitted changes", async () => {
+    const mockHerdr = async (): Promise<HerdrCall> => ({ ok: true, status: 0, stdout: "", stderr: "", json: null });
+    const mockDirtyGit: GitRunner = async (args) => {
+      if (args[0] === "status" && args[1] === "--porcelain") {
+        return { status: 0, stdout: " M uncommitted.ts\n", stderr: "" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    };
+
+    const state = await runDeliveryWorkflow({
+      cwd: "/fake/repo",
+      issue: sampleDeliveryIssue,
+      sibling: idleSibling,
+      client: mockHerdr,
+      runGit: mockDirtyGit,
+      pollIntervalMs: 10,
+    });
+
+    expect(state.isFinished).toBe(true);
+    expect(state.error).toContain("Working directory has uncommitted changes");
     expect(state.steps[0]?.status).toBe("failed");
   });
 });

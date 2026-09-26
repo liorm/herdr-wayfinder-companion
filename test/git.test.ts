@@ -102,7 +102,20 @@ describe("findAssociatedBranch", () => {
 });
 
 describe("prepareDeliveryBranch", () => {
-  test("checks out main, pulls, and creates new branch when branch does not exist", async () => {
+  test("fails if working directory has uncommitted changes", async () => {
+    const mockGit: GitRunner = async (args) => {
+      if (args[0] === "status" && args[1] === "--porcelain") {
+        return { status: 0, stdout: " M src/dirty.ts\n?? new-file.txt\n", stderr: "" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    };
+
+    const res = await prepareDeliveryBranch("/fake/repo", "42-branch", mockGit);
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Working directory has uncommitted changes (src/dirty.ts, new-file.txt)");
+  });
+
+  test("checks out main, pulls with rebase, and creates new branch when branch does not exist", async () => {
     const executed: string[][] = [];
     const mockGit: GitRunner = async (args) => {
       executed.push(args);
@@ -118,9 +131,10 @@ describe("prepareDeliveryBranch", () => {
     const res = await prepareDeliveryBranch("/fake/repo", "42-new-branch", mockGit);
     expect(res.ok).toBe(true);
     expect(executed).toEqual([
+      ["status", "--porcelain"],
       ["rev-parse", "--verify", "main"],
       ["checkout", "main"],
-      ["pull", "origin", "main"],
+      ["pull", "--rebase", "origin", "main"],
       ["rev-parse", "--verify", "42-new-branch"],
       ["checkout", "-b", "42-new-branch"],
     ]);
@@ -141,14 +155,14 @@ describe("prepareDeliveryBranch", () => {
   test("handles checkout failure gracefully", async () => {
     const mockGit: GitRunner = async (args) => {
       if (args[0] === "checkout" && args[1] === "main") {
-        return { status: 1, stdout: "", stderr: "error: you have local changes" };
+        return { status: 1, stdout: "", stderr: "error: checkout failed" };
       }
       return { status: 0, stdout: "", stderr: "" };
     };
 
     const res = await prepareDeliveryBranch("/fake/repo", "42-branch", mockGit);
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("Failed to checkout main: error: you have local changes");
+    expect(res.error).toContain("Failed to checkout main: error: checkout failed");
   });
 });
 

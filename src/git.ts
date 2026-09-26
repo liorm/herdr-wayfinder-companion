@@ -171,13 +171,25 @@ export function findAssociatedBranch(
 }
 
 /**
- * Checks out main/master, pulls latest, and creates or switches to the target branch.
+ * Checks out main/master, pulls latest with rebase, and creates or switches to the target branch.
+ * Requires a pristine working directory before proceeding.
  */
 export async function prepareDeliveryBranch(
   cwd: string,
   branchName: string,
   run: GitRunner = defaultGit,
 ): Promise<{ ok: boolean; error?: string }> {
+  // 1. Ensure working directory is pristine
+  const modified = await getModifiedFiles(cwd, run);
+  if (modified.length > 0) {
+    const fileList = modified.map((f) => f.path).slice(0, 5).join(", ");
+    const more = modified.length > 5 ? ` and ${modified.length - 5} more` : "";
+    return {
+      ok: false,
+      error: `Working directory has uncommitted changes (${fileList}${more}). Please commit, stash, or clean before starting delivery.`,
+    };
+  }
+
   // Determine default base branch (main or master)
   let baseBranch = "main";
   const checkMain = await run(["rev-parse", "--verify", "main"], cwd);
@@ -188,7 +200,7 @@ export async function prepareDeliveryBranch(
     }
   }
 
-  // 1. Checkout base branch
+  // 2. Checkout base branch
   const checkoutBase = await run(["checkout", baseBranch], cwd);
   if (checkoutBase.status !== 0) {
     return {
@@ -197,11 +209,11 @@ export async function prepareDeliveryBranch(
     };
   }
 
-  // 2. Pull latest base branch
-  const pullResult = await run(["pull", "origin", baseBranch], cwd);
+  // 3. Pull latest base branch with rebase
+  const pullResult = await run(["pull", "--rebase", "origin", baseBranch], cwd);
   if (pullResult.status !== 0) {
-    // If pull origin fails, try bare git pull
-    const fallbackPull = await run(["pull"], cwd);
+    // If pull origin fails, try bare git pull --rebase
+    const fallbackPull = await run(["pull", "--rebase"], cwd);
     if (fallbackPull.status !== 0) {
       return {
         ok: false,
@@ -210,7 +222,7 @@ export async function prepareDeliveryBranch(
     }
   }
 
-  // 3. Switch to or create branch
+  // 4. Switch to or create branch
   const branchExists = await run(["rev-parse", "--verify", branchName], cwd);
   if (branchExists.status === 0) {
     const checkoutBranch = await run(["checkout", branchName], cwd);
