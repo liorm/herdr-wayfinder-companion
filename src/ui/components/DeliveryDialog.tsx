@@ -4,6 +4,7 @@ import type { Issue } from "../../github/issues.ts";
 import type { ModifiedFile, PRInfo } from "../../git.ts";
 import type { DeliveryStep } from "../../wayfinder/delivery.ts";
 import { clipText, padLine, centerLine } from "../dialog.ts";
+import { terminalLink } from "../render.ts";
 
 export interface DeliveryDialogProps {
   issue: Issue;
@@ -91,7 +92,7 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
             {existingPR ? (
               <>
                 <Text>{padLine(` \x1b[1;36m${clipText(`PR: #${existingPR.number} ${existingPR.title}`, innerWidth - 2)}\x1b[0m`, innerWidth)}</Text>
-                <Text>{padLine(` \x1b[4;34m${clipText(`URL: ${existingPR.url}`, innerWidth - 2)}\x1b[0m`, innerWidth)}</Text>
+                <Text>{padLine(` \x1b[4;34m${clipText(`URL: ${terminalLink(existingPR.url, existingPR.url)}`, innerWidth - 2)}\x1b[0m`, innerWidth)}</Text>
               </>
             ) : null}
             <Text>{padLine("", innerWidth)}</Text>
@@ -199,7 +200,7 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
                     innerWidth,
                   )}
                 </Text>
-                <Text>{padLine(`    \x1b[4;34m${clipText(pr.url, innerWidth - 5)}\x1b[0m`, innerWidth)}</Text>
+                <Text>{padLine(`    \x1b[4;34m${clipText(terminalLink(pr.url, pr.url), innerWidth - 5)}\x1b[0m`, innerWidth)}</Text>
               </Box>
             ) : null}
 

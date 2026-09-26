@@ -90,7 +90,7 @@ describe("formatTicketView", () => {
     const lines = formatTicketView(issue, view, comments, 80, [issue], {
       prs: { 7: { number: 99, url: "https://github.com/org/repo/pull/99", state: "open" } },
     });
-    const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
+    const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*m|\x1b\]8;;.*?(?:\x07|\x1b\\)/g, ""));
     expect(plain.join("\n")).toContain("Pull Request: PR #99 • https://github.com/org/repo/pull/99 [open]");
   });
 });

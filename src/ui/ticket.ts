@@ -1,3 +1,4 @@
+import stringWidth from "string-width";
 import type { Issue } from "../github/issues.ts";
 import { boardRows, type BoardOptions, type RowTone } from "../wayfinder/board.ts";
 import { formatMarkdown } from "./markdown.ts";
@@ -95,7 +96,7 @@ export function formatTicketView(
   lines.push(
     ...renderSegments(
       [
-        { text: `#${issue.number}`, codes: "1" },
+        { text: issue.url ? `\x1b]8;;${issue.url}\x07#${issue.number}\x1b]8;;\x07` : `#${issue.number}`, codes: "1" },
         { text: closed ? "Closed" : "Open", codes: closed ? "2" : (TONE_SGR[tone] ?? "32") },
         ...statusBadges(badges, issue).map((badge) => ({ text: badge, codes: badgeCode(badge, tone) })),
       ],
@@ -113,8 +114,10 @@ export function formatTicketView(
 
   const pr = options?.prs ? (options.prs instanceof Map ? options.prs.get(issue.number) : options.prs[issue.number]) : undefined;
   if (pr) {
-    const prLine = `Pull Request: PR #${pr.number} • ${pr.url}${pr.state ? ` [${pr.state}]` : ""}`;
-    for (const line of wrapPlain(prLine, width)) lines.push(style(line, "35"));
+    const prLink = pr.url ? `\x1b]8;;${pr.url}\x07PR #${pr.number}\x1b]8;;\x07` : `PR #${pr.number}`;
+    const urlLink = pr.url ? `\x1b]8;;${pr.url}\x07${pr.url}\x1b]8;;\x07` : pr.url;
+    const prLine = `Pull Request: ${prLink} • ${urlLink}${pr.state ? ` [${pr.state}]` : ""}`;
+    lines.push(style(prLine, "35"));
   }
 
   const hasBody = description.length > 0 || comments.length > 0 || rest.length > 0;
@@ -207,22 +210,19 @@ function renderSegments(parts: Array<{ text: string; codes?: string }>, width: n
     used = 0;
   };
   const append = (chunk: string, codes: string | undefined) => {
-    if (used > 0 && used + 2 + [...chunk].length > width) commit();
+    const chunkWidth = stringWidth(chunk);
+    if (used > 0 && used + 2 + chunkWidth > width) commit();
     if (used > 0) {
       current += "  ";
       used += 2;
     }
     current += style(chunk, codes);
-    used += [...chunk].length;
+    used += chunkWidth;
   };
   for (const part of parts) {
     const text = part.text.trim();
     if (!text) continue;
-    const chunks = wrapPlain(text, width);
-    chunks.forEach((chunk, index) => {
-      append(chunk, part.codes);
-      if (index < chunks.length - 1) commit();
-    });
+    append(text, part.codes);
   }
   commit();
   return lines.length > 0 ? lines : [""];

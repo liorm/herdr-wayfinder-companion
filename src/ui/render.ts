@@ -225,14 +225,22 @@ function dialogLines(model: DialogModel, columns: number, rows: number): string[
 }
 
 
+/**
+ * Formats a terminal hyperlink using standard OSC 8 escape sequence.
+ */
+export function terminalLink(text: string, url?: string): string {
+  if (!url) return text;
+  return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+}
+
 function rowText(row: BoardRow, width: number): string {
   if (row.type === "label") return clip(row.text, width);
   const indent = "  ".repeat(row.depth);
   const prefix = `${indent}#${row.issue.number}  `;
   const badges = row.badges.length > 0 ? `  ${row.badges.join(" · ")}` : "";
-  const budget = width - [...prefix].length - [...badges].length;
-  if (budget < 8) return clip(`${prefix}${row.issue.title}${badges}`, width);
-  return `${prefix}${clip(row.issue.title, budget)}${badges}`;
+  const budget = width - visibleWidth(prefix) - visibleWidth(badges);
+  if (budget < 8) return clipAnsi(`${prefix}${row.issue.title}${badges}`, width);
+  return `${prefix}${clipAnsi(row.issue.title, budget)}${badges}`;
 }
 
 export function clip(text: string, width: number): string {
@@ -243,7 +251,7 @@ export function clip(text: string, width: number): string {
   return `${chars.slice(0, width - 1).join("")}…`;
 }
 
-const ANSI = /\x1b\[[0-9;]*m/g;
+const ANSI = /\x1b\[[0-9;]*m|\x1b\]8;;.*?(?:\x07|\x1b\\)/g;
 
 export function visibleWidth(text: string): number {
   return [...text.replace(ANSI, "")].length;
@@ -255,7 +263,7 @@ export function clipAnsi(text: string, width: number): string {
   if (visibleWidth(text) <= width) return text;
   let visible = 0;
   let out = "";
-  const pattern = /\x1b\[[0-9;]*m/g;
+  const pattern = /\x1b\[[0-9;]*m|\x1b\]8;;.*?(?:\x07|\x1b\\)/g;
   let cursor = 0;
   for (const match of text.matchAll(pattern)) {
     const index = match.index ?? 0;

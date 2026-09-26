@@ -1,9 +1,11 @@
 import React from "react";
 import { Box, Text } from "ink";
+import stringWidth from "string-width";
 import type { Issue, IssueState } from "../../github/issues.ts";
 import type { SiblingAgent } from "../../sibling.ts";
 import { boardRows, lineOfSelection, selectableIssues, type BoardRow, type RowTone } from "../../wayfinder/board.ts";
 import { clip, reveal } from "../render.ts";
+import { clipText } from "../dialog.ts";
 import { Header } from "./Header.tsx";
 
 export interface ListViewProps {
@@ -44,13 +46,13 @@ function formatRowText(row: BoardRow, width: number): string {
   const indent = "  ".repeat(row.depth);
   const prefix = `${indent}#${row.issue.number}  `;
   const badges = row.badges.length > 0 ? `  ${row.badges.join(" · ")}` : "";
-  const budget = width - [...prefix].length - [...badges].length;
-  if (budget < 8) return clip(`${prefix}${row.issue.title}${badges}`, width);
-  return `${prefix}${clip(row.issue.title, budget)}${badges}`;
+  const budget = width - stringWidth(prefix) - stringWidth(badges);
+  if (budget < 8) return clipText(`${prefix}${row.issue.title}${badges}`, width);
+  return `${prefix}${clipText(row.issue.title, budget)}${badges}`;
 }
 
 function padRight(text: string, width: number): string {
-  const extra = width - [...text].length;
+  const extra = width - stringWidth(text);
   return extra > 0 ? text + " ".repeat(extra) : text;
 }
 

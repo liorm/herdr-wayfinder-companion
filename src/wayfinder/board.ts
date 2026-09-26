@@ -237,7 +237,8 @@ function badgesFor(
     if (extras.length > 0) badges.push(extras.join(", "));
   }
   if (pr) {
-    badges.push(`PR #${pr.number}`);
+    const prText = `PR #${pr.number}`;
+    badges.push(pr.url ? `\x1b]8;;${pr.url}\x07${prText}\x1b]8;;\x07` : prText);
   } else if (branch) {
     badges.push(branch);
   }
