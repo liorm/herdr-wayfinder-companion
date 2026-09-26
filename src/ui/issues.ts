@@ -19,34 +19,56 @@ import {
   type MessageModel,
   type PaneModel,
 } from "./render.ts";
+import { readRuntime, type PluginRuntime } from "../runtime.ts";
+import { resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
 
 const MISSING_DIRECTORY =
   "No workspace directory in the Herdr context. Open Wayfinder Companion from a workspace.";
 
+export interface IssuePaneOptions {
+  onClose?: () => Promise<void>;
+  runtime?: PluginRuntime;
+  refreshIntervalMs?: number;
+  fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
+}
+
 export async function runIssuePane(
   cwd: string | undefined,
-  options?: { onClose?: () => Promise<void> },
+  options?: IssuePaneOptions,
 ): Promise<number> {
   try {
     if (!cwd) return await presentMessage(MISSING_DIRECTORY, 1);
-    if (!process.stdin.isTTY || !process.stdout.isTTY) return await printIssues(cwd);
+    const runtime = options?.runtime ?? readRuntime();
+    const fetchSibling = options?.fetchSibling ?? resolveSiblingAgent;
 
-    const loaded = await loadIssues(cwd, "open");
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      const sibling = await fetchSibling(runtime).catch(() => undefined);
+      return await printIssues(cwd, sibling);
+    }
+
+    const [loaded, sibling] = await Promise.all([
+      loadIssues(cwd, "open"),
+      fetchSibling(runtime).catch(() => undefined),
+    ]);
     if (!loaded.ok) return await presentMessage(loaded.message, 1);
-    await browse(cwd, listModel(loaded.repo, loaded.state, loaded.issues, 0));
+    await browse(cwd, listModel(loaded.repo, loaded.state, loaded.issues, 0, undefined, sibling), {
+      runtime,
+      refreshIntervalMs: options?.refreshIntervalMs,
+      fetchSibling,
+    });
     return 0;
   } finally {
     await options?.onClose?.().catch(() => {});
   }
 }
 
-async function printIssues(cwd: string): Promise<number> {
+async function printIssues(cwd: string, sibling?: SiblingAgent): Promise<number> {
   const loaded = await loadIssues(cwd, "open");
   if (!loaded.ok) {
     console.error(loaded.message);
     return 1;
   }
-  console.log(formatPlainIssues(loaded.repo, loaded.state, loaded.issues));
+  console.log(formatPlainIssues(loaded.repo, loaded.state, loaded.issues, sibling));
   return 0;
 }
 
@@ -68,83 +90,182 @@ async function presentMessage(message: string, code: number): Promise<number> {
   return code;
 }
 
-async function browse(cwd: string, initial: ListModel): Promise<void> {
+export async function refreshBoardState(
+  cwd: string,
+  currentState: IssueState,
+  runtime?: PluginRuntime,
+  fetchSibling: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined> = resolveSiblingAgent,
+) {
+  const [loaded, sibling] = await Promise.all([
+    loadIssues(cwd, currentState),
+    runtime ? fetchSibling(runtime).catch(() => undefined) : Promise.resolve(undefined),
+  ]);
+  return { loaded, sibling };
+}
+
+async function browse(cwd: string, initial: ListModel, options?: IssuePaneOptions): Promise<void> {
   let model: PaneModel = initial;
+  let currentSibling: SiblingAgent | undefined = initial.sibling;
+  const runtime = options?.runtime;
+  const fetchSibling = options?.fetchSibling ?? resolveSiblingAgent;
+  const intervalMs = options?.refreshIntervalMs ?? 5000;
+  let refreshing = false;
+
   await withTerminal(async (session) => {
     session.paint(model);
-    await session.until(async (key) => {
-      if (key.kind === "ctrl-c" || (key.kind === "char" && (key.value === "q" || key.value === "Q"))) {
-        return true;
-      }
-      if (model.kind !== "list" && model.kind !== "detail") return false;
 
-      if (model.kind === "detail") {
-        if (key.kind === "escape") {
-          model = model.list;
+    let timer: ReturnType<typeof setInterval> | undefined;
+
+    const backgroundRefresh = async () => {
+      if (refreshing) return;
+      if (model.kind !== "list" && model.kind !== "detail") return;
+      refreshing = true;
+      try {
+        const currentState = model.kind === "list" ? model.state : model.list.state;
+        const { loaded, sibling } = await refreshBoardState(cwd, currentState, runtime, fetchSibling);
+        if (sibling !== undefined) {
+          currentSibling = sibling;
+        }
+
+        if (model.kind === "list") {
+          if (loaded.ok) {
+            const previous = model.issues[model.selected]?.number;
+            const selected = model.selected;
+            const nextIssues = selectableIssues(boardRows(loaded.issues));
+            model = {
+              ...model,
+              repo: loaded.repo,
+              issues: nextIssues,
+              selected: preserveSelection(nextIssues, selected, previous),
+              sibling: currentSibling,
+              notice: undefined,
+            };
+          } else {
+            model = { ...model, sibling: currentSibling };
+          }
           session.paint(model);
-        } else if (key.kind === "up" || (key.kind === "char" && key.value === "k")) {
-          model = scrollDetail(model, -1);
+        } else if (model.kind === "detail") {
+          if (loaded.ok) {
+            const previous = model.list.issues[model.list.selected]?.number;
+            const selected = model.list.selected;
+            const nextIssues = selectableIssues(boardRows(loaded.issues));
+            model = {
+              ...model,
+              list: {
+                ...model.list,
+                repo: loaded.repo,
+                issues: nextIssues,
+                selected: preserveSelection(nextIssues, selected, previous),
+                sibling: currentSibling,
+                notice: undefined,
+              },
+            };
+          } else {
+            model = {
+              ...model,
+              list: {
+                ...model.list,
+                sibling: currentSibling,
+              },
+            };
+          }
+        }
+      } catch {
+        // ignore background errors
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    if (intervalMs > 0) {
+      timer = setInterval(backgroundRefresh, intervalMs);
+      timer.unref?.();
+    }
+
+    try {
+      await session.until(async (key) => {
+        if (key.kind === "ctrl-c" || (key.kind === "char" && (key.value === "q" || key.value === "Q"))) {
+          return true;
+        }
+        if (model.kind !== "list" && model.kind !== "detail") return false;
+
+        if (model.kind === "detail") {
+          if (key.kind === "escape") {
+            model = model.list;
+            session.paint(model);
+          } else if (key.kind === "up" || (key.kind === "char" && key.value === "k")) {
+            model = scrollDetail(model, -1);
+            session.paint(model);
+          } else if (key.kind === "down" || (key.kind === "char" && key.value === "j")) {
+            model = scrollDetail(model, 1);
+            session.paint(model);
+          }
+          return false;
+        }
+
+        if (key.kind === "escape") return true;
+
+        const windowSize = Math.max(session.rows() - 3, 1);
+        if (key.kind === "up" || (key.kind === "char" && key.value === "k")) {
+          model = moveSelection(model, -1, windowSize);
           session.paint(model);
-        } else if (key.kind === "down" || (key.kind === "char" && key.value === "j")) {
-          model = scrollDetail(model, 1);
+          return false;
+        }
+        if (key.kind === "down" || (key.kind === "char" && key.value === "j")) {
+          model = moveSelection(model, 1, windowSize);
+          session.paint(model);
+          return false;
+        }
+        if (key.kind === "char" && key.value === "f") {
+          const next = nextIssueState(model.state);
+          session.paint(loadingList(model, `Loading ${next} issues…`));
+          const { loaded, sibling } = await refreshBoardState(cwd, next, runtime, fetchSibling);
+          if (sibling !== undefined) currentSibling = sibling;
+          model = loaded.ok
+            ? listModel(loaded.repo, loaded.state, loaded.issues, undefined, session.rows(), currentSibling)
+            : { ...model, notice: loaded.message, sibling: currentSibling };
+          session.paint(model);
+          return false;
+        }
+        if (key.kind === "char" && key.value === "r") {
+          const previous = model.issues[model.selected]?.number;
+          const selected = model.selected;
+          session.paint(loadingList(model, "Refreshing…"));
+          const { loaded, sibling } = await refreshBoardState(cwd, model.state, runtime, fetchSibling);
+          if (sibling !== undefined) currentSibling = sibling;
+          model = loaded.ok
+            ? listModel(
+                loaded.repo,
+                loaded.state,
+                loaded.issues,
+                preserveSelection(loaded.issues, selected, previous),
+                session.rows(),
+                currentSibling,
+              )
+            : { ...model, notice: loaded.message, sibling: currentSibling };
+          session.paint(model);
+          return false;
+        }
+        if (key.kind === "enter") {
+          const issue = model.issues[model.selected];
+          if (!issue) return false;
+          const list = model;
+          session.paint(viewLoading(issue));
+          const viewed = await loadIssueView(cwd, issue.number);
+          let bodyText = viewed.ok ? viewed.body : "";
+          if (!bodyText.trim() && issue.body) {
+            bodyText = issue.body;
+          }
+          model = viewed.ok || bodyText.length > 0
+            ? { kind: "detail", issue, body: bodyText, scroll: 0, list }
+            : { ...list, notice: viewed.message };
           session.paint(model);
         }
         return false;
-      }
-
-      if (key.kind === "escape") return true;
-
-      const windowSize = Math.max(session.rows() - 3, 1);
-      if (key.kind === "up" || (key.kind === "char" && key.value === "k")) {
-        model = moveSelection(model, -1, windowSize);
-        session.paint(model);
-        return false;
-      }
-      if (key.kind === "down" || (key.kind === "char" && key.value === "j")) {
-        model = moveSelection(model, 1, windowSize);
-        session.paint(model);
-        return false;
-      }
-      if (key.kind === "char" && key.value === "f") {
-        const next = nextIssueState(model.state);
-        session.paint(loadingList(model, `Loading ${next} issues…`));
-        const loaded = await loadIssues(cwd, next);
-        model = loaded.ok
-          ? listModel(loaded.repo, loaded.state, loaded.issues, undefined, session.rows())
-          : { ...model, notice: loaded.message };
-        session.paint(model);
-        return false;
-      }
-      if (key.kind === "char" && key.value === "r") {
-        const previous = model.issues[model.selected]?.number;
-        const selected = model.selected;
-        session.paint(loadingList(model, "Refreshing…"));
-        const loaded = await loadIssues(cwd, model.state);
-        model = loaded.ok
-          ? listModel(
-              loaded.repo,
-              loaded.state,
-              loaded.issues,
-              preserveSelection(loaded.issues, selected, previous),
-              session.rows(),
-            )
-          : { ...model, notice: loaded.message };
-        session.paint(model);
-        return false;
-      }
-      if (key.kind === "enter") {
-        const issue = model.issues[model.selected];
-        if (!issue) return false;
-        const list = model;
-        session.paint(viewLoading(issue));
-        const viewed = await loadIssueView(cwd, issue.number);
-        model = viewed.ok
-          ? { kind: "detail", issue, body: viewed.body, scroll: 0, list }
-          : { ...list, notice: viewed.message };
-        session.paint(model);
-      }
-      return false;
-    });
+      });
+    } finally {
+      if (timer) clearInterval(timer);
+    }
   });
 }
 
@@ -154,6 +275,7 @@ function listModel(
   issues: Issue[],
   selected: number | undefined,
   rows = termRows(),
+  sibling?: SiblingAgent,
 ): ListModel {
   const arranged = selectableIssues(boardRows(issues));
   const index = selected === undefined ? 0 : selected;
@@ -166,6 +288,7 @@ function listModel(
     issues: arranged,
     selected: chosen,
     scroll: reveal(lineOfSelection(boardRows(arranged), chosen), 0, windowSize),
+    sibling,
   };
 }
 

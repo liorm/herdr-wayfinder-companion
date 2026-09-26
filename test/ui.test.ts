@@ -29,6 +29,48 @@ describe("renderPane", () => {
     expect(frame).toContain("bug");
     expect(frame).toContain("\x1b[7m");
   });
+
+  test("shows the sibling agent and last reported message in the status line", () => {
+    const model: ListModel = {
+      kind: "list",
+      repo: "acme/widgets",
+      state: "open",
+      issues: [issue],
+      selected: 0,
+      scroll: 0,
+      sibling: {
+        agent: "grok",
+        status: "idle",
+        lastMessage: "One role bundles Studio and People grant…",
+      },
+    };
+    const frame = renderPane(model, 100, 8);
+    expect(frame).toContain("grok (idle): One role bundles Studio and People grant…");
+  });
+
+  test("detail view falls back to issue.body when model.body is empty", () => {
+    const list: ListModel = {
+      kind: "list",
+      repo: "acme/widgets",
+      state: "open",
+      issues: [{ ...issue, body: "This is the fallback body from issue list." }],
+      selected: 0,
+      scroll: 0,
+    };
+    const frame = renderPane(
+      {
+        kind: "detail",
+        issue: { ...issue, body: "This is the fallback body from issue list." },
+        body: "",
+        scroll: 0,
+        list,
+      },
+      80,
+      8,
+    );
+    expect(frame).toContain("This is the fallback body from issue list.");
+    expect(frame).not.toContain("This issue has no body.");
+  });
 });
 
 describe("formatPlainIssues", () => {
@@ -38,6 +80,15 @@ describe("formatPlainIssues", () => {
 
   test("says when the filter is empty", () => {
     expect(formatPlainIssues("acme/widgets", "closed", [])).toContain("No closed issues.");
+  });
+
+  test("includes the sibling agent status and message when present", () => {
+    const output = formatPlainIssues("acme/widgets", "open", [issue], {
+      agent: "claude",
+      status: "working",
+      lastMessage: "Refactoring auth endpoints",
+    });
+    expect(output).toContain("acme/widgets  (open) · claude (working): Refactoring auth endpoints");
   });
 });
 

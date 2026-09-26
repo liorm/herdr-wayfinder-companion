@@ -9,7 +9,7 @@ if [ "$args" = "issue list --state open --limit 200 --json number,title,labels,a
   printf '%s\n' '[{"number":7,"title":"Fix the gate","labels":[{"name":"bug"}],"assignees":[],"author":{"login":"ada"},"url":"https://example.com/7"}]'
   exit 0
 fi
-if [ "$args" = "issue view 7 --comments" ]; then
+if [ "$args" = "issue view 7" ] || [ "$args" = "issue view 7 --comments" ]; then
   printf '%s\n' 'title: Fix the gate'
   exit 0
 fi

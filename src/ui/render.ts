@@ -1,5 +1,6 @@
 import { ISSUE_LIMIT, type Issue, type IssueState } from "../github/issues.ts";
 import { boardRows, lineOfSelection, selectableIssues, type BoardRow, type RowTone } from "../wayfinder/board.ts";
+import type { SiblingAgent } from "../sibling.ts";
 
 export interface ListModel {
   kind: "list";
@@ -9,6 +10,7 @@ export interface ListModel {
   selected: number;
   scroll: number;
   notice?: string;
+  sibling?: SiblingAgent;
 }
 
 export interface DetailModel {
@@ -64,8 +66,48 @@ export function renderPane(model: PaneModel, columns: number, rows: number): str
   return frame;
 }
 
-export function formatPlainIssues(repo: string, state: IssueState, issues: Issue[]): string {
-  const lines = [`${repo}  (${state})`, ""];
+export function formatAgentDetails(sibling: SiblingAgent): string {
+  const agentName = sibling.agent;
+  const status = sibling.status;
+  const message = sibling.lastMessage;
+
+  let label = "";
+  if (agentName && status) {
+    label = `${agentName} (${status})`;
+  } else if (agentName) {
+    label = agentName;
+  } else if (status) {
+    label = `agent (${status})`;
+  }
+
+  if (label && message) {
+    return `${label}: ${message}`;
+  }
+  if (message) {
+    return message;
+  }
+  if (label) {
+    return label;
+  }
+  return "";
+}
+
+export function formatSubtitle(summary: string, notice?: string, sibling?: SiblingAgent): string {
+  if (notice) return notice;
+  if (!sibling) return summary;
+  const details = formatAgentDetails(sibling);
+  return details ? `${summary} · ${details}` : summary;
+}
+
+export function formatPlainIssues(
+  repo: string,
+  state: IssueState,
+  issues: Issue[],
+  sibling?: SiblingAgent,
+): string {
+  const summary = `${repo}  (${state})`;
+  const header = sibling ? formatSubtitle(summary, undefined, sibling) : summary;
+  const lines = [header, ""];
   const rows = boardRows(issues);
   if (selectableIssues(rows).length === 0) {
     lines.push(`No ${state} issues.`);
@@ -83,7 +125,7 @@ function listLines(model: ListModel, columns: number, rows: number): string[] {
   const count = model.issues.length === ISSUE_LIMIT ? `${ISSUE_LIMIT} (limit)` : String(model.issues.length);
   const maps = model.issues.filter((issue) => issue.labels.includes("wayfinder:map")).length;
   const summary = maps > 0 ? `${model.state} · ${count} · ${maps} ${maps === 1 ? "map" : "maps"}` : `${model.state} · ${count}`;
-  const subtitle = model.notice ?? summary;
+  const subtitle = formatSubtitle(summary, model.notice, model.sibling);
   const lines = [
     pad(clip(`Wayfinder Companion  ${model.repo}`, columns), columns),
     pad(clip(subtitle, columns), columns),
@@ -110,7 +152,8 @@ function listLines(model: ListModel, columns: number, rows: number): string[] {
 
 function detailLines(model: DetailModel, columns: number, rows: number): string[] {
   const windowSize = Math.max(rows - 3, 1);
-  const body = model.body.length > 0 ? model.body.split("\n") : ["This issue has no body."];
+  const text = model.body.trim().length > 0 ? model.body : (model.issue.body?.trim() ?? "");
+  const body = text.length > 0 ? text.split("\n") : ["This issue has no body."];
   const scroll = moveScroll(model.scroll, 0, body.length, windowSize);
   const lines = [
     pad(clip(`#${model.issue.number}  ${model.issue.title}`, columns), columns),

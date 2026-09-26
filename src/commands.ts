@@ -1,6 +1,7 @@
 import { PLUGIN_ID, readRuntime, repoDirectory, type PluginRuntime } from "./runtime.ts";
 import { createClient, type HerdrCall } from "./herdr.ts";
 import { runIssuePane } from "./ui/issues.ts";
+import { resolveSiblingAgent, type SiblingAgent } from "./sibling.ts";
 
 export interface StatusReport {
   pluginId: string;
@@ -10,6 +11,7 @@ export interface StatusReport {
   tabId?: string;
   paneId?: string;
   context: PluginRuntime["context"];
+  sibling?: SiblingAgent;
   calls: {
     workspaceList: HerdrCall;
     agentList: HerdrCall;
@@ -18,9 +20,10 @@ export interface StatusReport {
 
 export async function collectStatus(runtime: PluginRuntime = readRuntime()): Promise<StatusReport> {
   const herdr = createClient(runtime.binPath);
-  const [workspaceList, agentList] = await Promise.all([
+  const [workspaceList, agentList, sibling] = await Promise.all([
     herdr(["workspace", "list"]),
     herdr(["agent", "list"]),
+    resolveSiblingAgent(runtime, herdr),
   ]);
 
   return {
@@ -31,6 +34,7 @@ export async function collectStatus(runtime: PluginRuntime = readRuntime()): Pro
     tabId: runtime.tabId ?? runtime.context.tabId,
     paneId: runtime.paneId ?? runtime.context.paneId,
     context: runtime.context,
+    sibling,
     calls: { workspaceList, agentList },
   };
 }
@@ -73,6 +77,7 @@ export async function ui(): Promise<number> {
   // HERDR_PANE_ID from this session must not close that pane on quit.
   const paneId = runtime.entrypointId === "board" ? runtime.paneId : undefined;
   return runIssuePane(repoDirectory(runtime.context), {
+    runtime,
     onClose: paneId
       ? async () => {
           await createClient(runtime.binPath)(["pane", "close", paneId]);

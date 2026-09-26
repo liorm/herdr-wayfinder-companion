@@ -78,13 +78,34 @@ describe("loadIssues", () => {
 });
 
 describe("loadIssueView", () => {
-  test("returns the gh issue view text", async () => {
+  test("returns the gh issue view text and appends comments if present", async () => {
     const run: GhRunner = async (args) => {
-      expect(args).toEqual(["issue", "view", "7", "--comments"]);
-      return { status: 0, stdout: "title:\tFix the gate\n", stderr: "" };
+      if (args.includes("--comments")) {
+        return { status: 0, stdout: "comment 1: approved\n", stderr: "" };
+      }
+      expect(args).toEqual(["issue", "view", "7"]);
+      return { status: 0, stdout: "title:\tFix the gate\n--\nFix the gate body\n", stderr: "" };
     };
     const viewed = await loadIssueView("/work/widgets", 7, run);
-    expect(viewed).toEqual({ ok: true, body: "title:\tFix the gate" });
+    expect(viewed).toEqual({
+      ok: true,
+      body: "title:\tFix the gate\n--\nFix the gate body\n\ncomment 1: approved",
+    });
+  });
+
+  test("returns the issue view body even when there are 0 comments", async () => {
+    const run: GhRunner = async (args) => {
+      if (args.includes("--comments")) {
+        return { status: 0, stdout: "", stderr: "" };
+      }
+      expect(args).toEqual(["issue", "view", "7"]);
+      return { status: 0, stdout: "title:\tFix the gate\n--\nHere is the issue description\n", stderr: "" };
+    };
+    const viewed = await loadIssueView("/work/widgets", 7, run);
+    expect(viewed).toEqual({
+      ok: true,
+      body: "title:\tFix the gate\n--\nHere is the issue description",
+    });
   });
 });
 

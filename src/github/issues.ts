@@ -81,9 +81,23 @@ export async function loadIssueView(
   number: number,
   run: GhRunner = defaultGh,
 ): Promise<{ ok: true; body: string } | { ok: false; message: string }> {
-  const result = await run(["issue", "view", String(number), "--comments"], cwd);
+  const result = await run(["issue", "view", String(number)], cwd);
   if (result.status !== 0) return { ok: false, message: ghFailure(result) };
-  return { ok: true, body: result.stdout.replace(/\s+$/, "") };
+  let body = result.stdout.replace(/\s+$/, "");
+
+  try {
+    const comments = await run(["issue", "view", String(number), "--comments"], cwd);
+    if (comments.status === 0) {
+      const commentText = comments.stdout.replace(/\s+$/, "");
+      if (commentText.length > 0) {
+        body = body ? `${body}\n\n${commentText}` : commentText;
+      }
+    }
+  } catch {
+    // comments fetching is best-effort
+  }
+
+  return { ok: true, body };
 }
 
 export async function defaultGh(args: string[], cwd: string): Promise<GhOutput> {
