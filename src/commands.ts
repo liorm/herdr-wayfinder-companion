@@ -1,7 +1,7 @@
 import { PLUGIN_ID, readRuntime, repoDirectory, type PluginRuntime } from "./runtime.ts";
 import { createClient, type HerdrCall } from "./herdr.ts";
 import { runIssuePane } from "./ui/issues.tsx";
-import { resolveSiblingAgent, findAgentPaneInCurrentTab, type SiblingAgent } from "./sibling.ts";
+import { resolveSiblingAgent, type SiblingAgent } from "./sibling.ts";
 import {
   findCompanionPaneInWorkspace,
   registerWorkspacePane,
@@ -54,9 +54,11 @@ export async function status(): Promise<number> {
   return failed ? 1 : 0;
 }
 
-export async function open(): Promise<number> {
-  const runtime = readRuntime();
-  const herdr = createClient(runtime.binPath);
+export async function open(
+  runtime: PluginRuntime = readRuntime(),
+  client?: (args: string[]) => Promise<HerdrCall>,
+): Promise<number> {
+  const herdr = client ?? createClient(runtime.binPath);
   const workspaceId = runtime.workspaceId ?? runtime.context.workspaceId;
 
   if (workspaceId) {
@@ -73,7 +75,8 @@ export async function open(): Promise<number> {
     }
   }
 
-  const targetPaneId = await findAgentPaneInCurrentTab(runtime, herdr);
+  const sibling = await resolveSiblingAgent(runtime, herdr);
+  const targetPaneId = sibling?.paneId;
 
   const openArgs = [
     "plugin",
@@ -105,6 +108,7 @@ export async function open(): Promise<number> {
     if (newPaneId) {
       registerWorkspacePane(workspaceId, newPaneId, runtime.stateDir, {
         siblingPaneId: targetPaneId,
+        siblingAgent: sibling?.agent,
       });
     }
   }
@@ -113,13 +117,15 @@ export async function open(): Promise<number> {
   return 0;
 }
 
-export async function ui(): Promise<number> {
-  const runtime = readRuntime();
+export async function ui(
+  runtime: PluginRuntime = readRuntime(),
+  client?: (args: string[]) => Promise<HerdrCall>,
+): Promise<number> {
   // Only the board entrypoint owns its pane. A test or shell that inherits
   // HERDR_PANE_ID from this session must not close that pane on quit.
   const paneId = runtime.entrypointId === "board" ? runtime.paneId : undefined;
   const workspaceId = runtime.workspaceId ?? runtime.context.workspaceId;
-  const herdr = createClient(runtime.binPath);
+  const herdr = client ?? createClient(runtime.binPath);
 
   if (workspaceId && paneId) {
     const existingPaneId = await findCompanionPaneInWorkspace(workspaceId, runtime, herdr);
@@ -141,7 +147,18 @@ export async function ui(): Promise<number> {
     ]).catch(() => {});
   }
 
-  return runIssuePane(repoDirectory(runtime.context), {
+  const sibling = await resolveSiblingAgent(runtime, herdr).catch(() => undefined);
+  const targetCwd = sibling?.cwd ?? repoDirectory(runtime.context);
+
+  if (targetCwd) {
+    try {
+      process.chdir(targetCwd);
+    } catch {
+      // Best-effort
+    }
+  }
+
+  return runIssuePane(targetCwd, {
     runtime,
     onClose: paneId
       ? async () => {

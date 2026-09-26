@@ -275,6 +275,49 @@ describe("resolveSiblingAgent", () => {
     expect(sibling?.status).toBe("working");
     expect(sibling?.lastMessage).toBe("Fixing edge cases");
   });
+
+  test("extracts cwd and foreground_cwd from sibling pane or agent", async () => {
+    const runtime: PluginRuntime = {
+      pluginId: "wayfinder.companion",
+      binPath: "herdr",
+      paneId: "w1:p_companion",
+      tabId: "w1:t1",
+      context: { raw: {} },
+    };
+
+    const mockHerdr = async (args: string[]): Promise<any> => {
+      const cmd = args.join(" ");
+      if (cmd.includes("pane list")) {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: {
+            result: {
+              panes: [
+                {
+                  pane_id: "w1:p_agent",
+                  tab_id: "w1:t1",
+                  agent: "grok",
+                  agent_status: "idle",
+                  foreground_cwd: "/custom/project/dir",
+                  cwd: "/session/root",
+                },
+              ],
+            },
+          },
+        };
+      }
+      if (cmd.includes("agent list")) {
+        return { ok: true, status: 0, stdout: "", stderr: "", json: { result: { agents: [] } } };
+      }
+      return { ok: false, status: 1, stdout: "", stderr: "", json: null };
+    };
+
+    const sibling = await resolveSiblingAgent(runtime, mockHerdr);
+    expect(sibling?.cwd).toBe("/custom/project/dir");
+  });
 });
 
 describe("collectStatus", () => {

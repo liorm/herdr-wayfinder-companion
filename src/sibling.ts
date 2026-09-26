@@ -6,6 +6,7 @@ export interface SiblingAgent {
   agent?: string;
   status?: string;
   lastMessage?: string;
+  cwd?: string;
 }
 
 export function escapeRegex(str: string): string {
@@ -85,6 +86,8 @@ interface RawPaneInfo {
   terminal_title_stripped?: string;
   state_labels?: Record<string, string>;
   tokens?: Record<string, string>;
+  cwd?: string;
+  foreground_cwd?: string;
 }
 
 interface RawAgentInfo {
@@ -96,6 +99,8 @@ interface RawAgentInfo {
   terminal_title_stripped?: string;
   state_labels?: Record<string, string>;
   tokens?: Record<string, string>;
+  cwd?: string;
+  foreground_cwd?: string;
 }
 
 export async function resolveSiblingAgent(
@@ -246,11 +251,21 @@ export async function resolveSiblingAgent(
       (runtime.context.raw.last_message as string | undefined);
   }
 
+  // Resolve cwd
+  const cwd =
+    paneObj?.foreground_cwd ??
+    paneObj?.cwd ??
+    agentObj?.foreground_cwd ??
+    agentObj?.cwd ??
+    runtime.context.focusedPaneCwd ??
+    runtime.context.workspaceCwd;
+
   return {
     paneId: candidatePaneId,
     agent: agentName,
     status,
     lastMessage,
+    cwd,
   };
 }
 
