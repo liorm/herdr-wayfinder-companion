@@ -1,5 +1,6 @@
 import { createClient, type HerdrCall } from "./herdr.ts";
 import type { PluginRuntime } from "./runtime.ts";
+import { readWorkspaceInstances } from "./workspace.ts";
 
 export interface SiblingAgent {
   paneId?: string;
@@ -80,8 +81,10 @@ interface RawPaneInfo {
   tab_id?: string;
   workspace_id?: string;
   agent?: string;
+  agent_session?: { agent?: string; kind?: string; source?: string; value?: string };
   agent_status?: string;
   title?: string;
+  label?: string;
   terminal_title?: string;
   terminal_title_stripped?: string;
   state_labels?: Record<string, string>;
@@ -126,33 +129,76 @@ export async function resolveSiblingAgent(
       : [];
 
   const currentTabId = runtime.tabId ?? runtime.context.tabId;
-  const selfPaneId = runtime.paneId;
+  const currentWorkspaceId = runtime.workspaceId ?? runtime.context.workspaceId;
 
-  // Filter panes in the current tab, excluding the board pane itself
-  const tabPanes = currentTabId
-    ? panes.filter((p) => p.tab_id === currentTabId && p.pane_id !== selfPaneId)
-    : panes.filter((p) => p.pane_id !== selfPaneId);
+  // selfPaneId is ONLY set when running as the board entrypoint itself
+  const selfPaneId = runtime.entrypointId === "board" ? runtime.paneId : undefined;
+
+  const instances = readWorkspaceInstances(runtime.stateDir);
+
+  const isCompanion = (p: RawPaneInfo): boolean => {
+    if (selfPaneId && p.pane_id === selfPaneId) return true;
+    if (p.tokens?.["wayfinder"] === "1" || p.tokens?.["wayfinder.companion"] === "1") return true;
+    if (p.title === "Wayfinder Companion" || p.label === "Wayfinder Companion") return true;
+    if (Object.values(instances).some((inst) => inst.paneId === p.pane_id)) return true;
+    return false;
+  };
+
+  const isAgent = (p: RawPaneInfo): boolean => {
+    if (p.agent && p.agent.trim().length > 0) return true;
+    if (p.agent_session?.agent) return true;
+    if (agents.some((a) => a.pane_id && a.pane_id === p.pane_id)) return true;
+    if (p.agent_status && p.agent_status !== "unknown") return true;
+    return false;
+  };
+
+  // Filter candidate panes in the current tab/workspace, excluding companion panes
+  const candidatePanes = panes.filter((p) => {
+    if (isCompanion(p)) return false;
+    if (currentTabId && p.tab_id && p.tab_id !== currentTabId) return false;
+    if (currentWorkspaceId && p.workspace_id && p.workspace_id !== currentWorkspaceId) return false;
+    return true;
+  });
+
+  const focusedPaneId =
+    runtime.context.paneId ??
+    (runtime.context.raw.focused_pane_id as string | undefined) ??
+    (runtime.entrypointId !== "board" ? runtime.paneId : undefined);
 
   let candidatePaneId: string | undefined;
   let candidateAgentName: string | undefined;
 
-  // 2. Identify the first agent in the current tab (regardless of pane location)
-  for (const pane of tabPanes) {
-    const matchingAgent = agents.find((a) => a.pane_id && a.pane_id === pane.pane_id);
-    const agentName = pane.agent ?? matchingAgent?.agent;
-    if (agentName || matchingAgent || pane.agent_status) {
-      candidatePaneId = pane.pane_id;
-      candidateAgentName = agentName;
-      break;
+  // 2. Check if the focused pane is an agent in the candidate list
+  if (focusedPaneId) {
+    const focusedPane = candidatePanes.find((p) => p.pane_id === focusedPaneId);
+    if (focusedPane && isAgent(focusedPane)) {
+      candidatePaneId = focusedPane.pane_id;
+      const matchingAgent = agents.find((a) => a.pane_id && a.pane_id === focusedPane.pane_id);
+      candidateAgentName = focusedPane.agent ?? matchingAgent?.agent ?? runtime.context.focusedPaneAgent;
     }
   }
 
-  // 3. If not found, check agent list for any agent matching the tab
-  if (!candidatePaneId && currentTabId) {
+  // 3. Identify the first agent in candidate panes
+  if (!candidatePaneId) {
+    for (const pane of candidatePanes) {
+      if (isAgent(pane)) {
+        const matchingAgent = agents.find((a) => a.pane_id && a.pane_id === pane.pane_id);
+        candidatePaneId = pane.pane_id;
+        candidateAgentName = pane.agent ?? matchingAgent?.agent;
+        break;
+      }
+    }
+  }
+
+  // 4. If not found, check agent list for any agent matching tab/workspace
+  if (!candidatePaneId) {
     const matchingAgent = agents.find((a) => {
-      if (!a.pane_id || a.pane_id === selfPaneId) return false;
+      if (!a.pane_id || (selfPaneId && a.pane_id === selfPaneId)) return false;
       const pane = panes.find((p) => p.pane_id === a.pane_id);
-      return pane?.tab_id === currentTabId;
+      if (pane && isCompanion(pane)) return false;
+      if (currentTabId && pane?.tab_id) return pane.tab_id === currentTabId;
+      if (currentWorkspaceId && pane?.workspace_id) return pane.workspace_id === currentWorkspaceId;
+      return true;
     });
     if (matchingAgent?.pane_id) {
       candidatePaneId = matchingAgent.pane_id;
@@ -160,13 +206,13 @@ export async function resolveSiblingAgent(
     }
   }
 
-  // 4. If still not found, check context for focusedPaneAgent
+  // 5. If still not found, check context for focusedPaneAgent
   if (!candidatePaneId && runtime.context.focusedPaneAgent) {
-    candidatePaneId = runtime.context.paneId ?? (runtime.context.raw.focused_pane_id as string | undefined);
+    candidatePaneId = focusedPaneId;
     candidateAgentName = runtime.context.focusedPaneAgent;
   }
 
-  // 5. If still not found, check neighbor to the left (if self pane is known)
+  // 6. If still not found, check neighbor to the left (if running as board UI with selfPaneId)
   if (!candidatePaneId && selfPaneId) {
     const neighborCall = await herdr(["pane", "neighbor", "--direction", "left", "--pane", selfPaneId]);
     if (neighborCall.ok && neighborCall.json && typeof neighborCall.json === "object") {
@@ -177,9 +223,19 @@ export async function resolveSiblingAgent(
     }
   }
 
-  // 6. Fallback to first non-self pane in current tab
-  if (!candidatePaneId && tabPanes.length > 0) {
-    candidatePaneId = tabPanes[0]?.pane_id;
+  // 7. If focused pane is in candidate panes, use it even if not detected as agent
+  if (!candidatePaneId && focusedPaneId) {
+    const focusedPane = candidatePanes.find((p) => p.pane_id === focusedPaneId);
+    if (focusedPane) {
+      candidatePaneId = focusedPane.pane_id;
+      candidateAgentName = focusedPane.agent;
+    }
+  }
+
+  // 8. Fallback to first non-companion candidate pane
+  if (!candidatePaneId && candidatePanes.length > 0) {
+    candidatePaneId = candidatePanes[0]?.pane_id;
+    candidateAgentName = candidatePanes[0]?.agent;
   }
 
   if (candidatePaneId && selfPaneId && candidatePaneId === selfPaneId) {

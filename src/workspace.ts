@@ -116,12 +116,13 @@ export async function findCompanionPaneInWorkspace(
     unregisterWorkspacePane(workspaceId, recorded, runtime.stateDir);
   }
 
-  // 2. Check if any workspace pane has wayfinder tokens or title
+  // 2. Check if any workspace pane has wayfinder tokens or title/label
   const matchingToken = workspacePanes.find(
     (p) =>
       p.tokens?.["wayfinder"] === "1" ||
       p.tokens?.["wayfinder.companion"] === "1" ||
-      p.title === "Wayfinder Companion",
+      p.title === "Wayfinder Companion" ||
+      (p as any).label === "Wayfinder Companion",
   );
 
   if (matchingToken && matchingToken.pane_id) {

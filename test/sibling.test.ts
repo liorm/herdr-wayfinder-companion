@@ -318,6 +318,170 @@ describe("resolveSiblingAgent", () => {
     const sibling = await resolveSiblingAgent(runtime, mockHerdr);
     expect(sibling?.cwd).toBe("/custom/project/dir");
   });
+
+  test("targets agent pane when invoked from agent pane with a shell pane below", async () => {
+    // Action invocation context: runtime.paneId is inherited from the agent pane,
+    // runtime.entrypointId is not 'board'.
+    const runtime: PluginRuntime = {
+      pluginId: "wayfinder.companion",
+      binPath: "herdr",
+      workspaceId: "w11",
+      tabId: "w11:t1",
+      paneId: "w11:p3",
+      context: {
+        raw: {
+          workspace_id: "w11",
+          tab_id: "w11:t1",
+          focused_pane_id: "w11:p3",
+          focused_pane_agent: "agy",
+          focused_pane_status: "working",
+        },
+        workspaceId: "w11",
+        tabId: "w11:t1",
+        paneId: "w11:p3",
+        focusedPaneAgent: "agy",
+        focusedPaneStatus: "working",
+      },
+    };
+
+    const mockHerdr = async (args: string[]): Promise<any> => {
+      const cmd = args.join(" ");
+      if (cmd.includes("pane list")) {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: {
+            result: {
+              panes: [
+                {
+                  pane_id: "w11:p3",
+                  tab_id: "w11:t1",
+                  workspace_id: "w11",
+                  agent: "agy",
+                  agent_status: "working",
+                  focused: true,
+                },
+                {
+                  pane_id: "w11:p9",
+                  tab_id: "w11:t1",
+                  workspace_id: "w11",
+                  agent_status: "unknown",
+                  focused: false,
+                },
+              ],
+            },
+          },
+        };
+      }
+      if (cmd.includes("agent list")) {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: {
+            result: {
+              agents: [
+                {
+                  pane_id: "w11:p3",
+                  agent: "agy",
+                  agent_status: "working",
+                  tab_id: "w11:t1",
+                  workspace_id: "w11",
+                },
+              ],
+            },
+          },
+        };
+      }
+      return { ok: false, status: 1, stdout: "", stderr: "", json: null };
+    };
+
+    const sibling = await resolveSiblingAgent(runtime, mockHerdr);
+    expect(sibling?.paneId).toBe("w11:p3");
+    expect(sibling?.agent).toBe("agy");
+  });
+
+  test("targets agent pane when invoked from non-agent shell pane in same tab", async () => {
+    const runtime: PluginRuntime = {
+      pluginId: "wayfinder.companion",
+      binPath: "herdr",
+      workspaceId: "w11",
+      tabId: "w11:t1",
+      paneId: "w11:p9",
+      context: {
+        raw: {
+          workspace_id: "w11",
+          tab_id: "w11:t1",
+          focused_pane_id: "w11:p9",
+        },
+        workspaceId: "w11",
+        tabId: "w11:t1",
+        paneId: "w11:p9",
+      },
+    };
+
+    const mockHerdr = async (args: string[]): Promise<any> => {
+      const cmd = args.join(" ");
+      if (cmd.includes("pane list")) {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: {
+            result: {
+              panes: [
+                {
+                  pane_id: "w11:p9",
+                  tab_id: "w11:t1",
+                  workspace_id: "w11",
+                  agent_status: "unknown",
+                  focused: true,
+                },
+                {
+                  pane_id: "w11:p3",
+                  tab_id: "w11:t1",
+                  workspace_id: "w11",
+                  agent: "agy",
+                  agent_status: "working",
+                  focused: false,
+                },
+              ],
+            },
+          },
+        };
+      }
+      if (cmd.includes("agent list")) {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: {
+            result: {
+              agents: [
+                {
+                  pane_id: "w11:p3",
+                  agent: "agy",
+                  agent_status: "working",
+                  tab_id: "w11:t1",
+                  workspace_id: "w11",
+                },
+              ],
+            },
+          },
+        };
+      }
+      return { ok: false, status: 1, stdout: "", stderr: "", json: null };
+    };
+
+    const sibling = await resolveSiblingAgent(runtime, mockHerdr);
+    expect(sibling?.paneId).toBe("w11:p3");
+    expect(sibling?.agent).toBe("agy");
+  });
 });
 
 describe("collectStatus", () => {
