@@ -484,6 +484,79 @@ export function matchPullRequestsToIssues(
 }
 
 /**
+ * Squashes and merges a pull request on GitHub via gh pr merge.
+ */
+export async function squashPullRequest(
+  cwd: string,
+  prNumber: number,
+  runGh: GhRunner = defaultGh,
+): Promise<{ ok: boolean; error?: string }> {
+  // Try gh pr merge <prNumber> --squash --delete-branch
+  const result = await runGh(["pr", "merge", String(prNumber), "--squash", "--delete-branch"], cwd);
+  if (result.status === 0) {
+    return { ok: true };
+  }
+  // Try fallback with auto-merge if standard merge failed (e.g. checks in progress or auto-merge required)
+  const autoResult = await runGh(["pr", "merge", String(prNumber), "--squash", "--auto", "--delete-branch"], cwd);
+  if (autoResult.status === 0) {
+    return { ok: true };
+  }
+  const errorMsg =
+    autoResult.stderr.trim() ||
+    result.stderr.trim() ||
+    autoResult.stdout.trim() ||
+    result.stdout.trim() ||
+    `gh pr merge failed with status ${result.status}`;
+  return { ok: false, error: errorMsg };
+}
+
+/**
+ * Polls GitHub until the issue/ticket is closed.
+ */
+export async function waitForTicketClosed(
+  cwd: string,
+  issueNumber: number,
+  runGh: GhRunner = defaultGh,
+  maxWaitMs = 30_000,
+  pollIntervalMs = 1_000,
+  onPoll?: () => void | Promise<void>,
+): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const result = await runGh(["issue", "view", String(issueNumber), "--json", "state,closed"], cwd);
+    if (result.status === 0 && result.stdout.trim()) {
+      try {
+        const parsed = JSON.parse(result.stdout) as { state?: string; closed?: boolean };
+        if (parsed.closed === true || parsed.state?.toUpperCase() === "CLOSED") {
+          return true;
+        }
+      } catch {
+        // ignore JSON parse error
+      }
+    }
+    if (onPoll) {
+      await onPoll();
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  // Final check
+  const finalResult = await runGh(["issue", "view", String(issueNumber), "--json", "state,closed"], cwd);
+  if (finalResult.status === 0 && finalResult.stdout.trim()) {
+    try {
+      const parsed = JSON.parse(finalResult.stdout) as { state?: string; closed?: boolean };
+      if (parsed.closed === true || parsed.state?.toUpperCase() === "CLOSED") {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return false;
+}
+
+/**
  * Opens a URL in the user's default browser.
  */
 export function openInBrowser(url: string): void {
@@ -495,3 +568,4 @@ export function openInBrowser(url: string): void {
     // ignore
   }
 }
+

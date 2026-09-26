@@ -416,3 +416,78 @@ describe("listPullRequests and matchPullRequestsToIssues", () => {
     expect(matched[140]?.number).toBe(11);
   });
 });
+
+describe("squashPullRequest", () => {
+  test("squashes PR with delete-branch flag successfully", async () => {
+    const { squashPullRequest } = await import("../src/git.ts");
+    const mockGh: GhRunner = async (args) => {
+      expect(args).toEqual(["pr", "merge", "45", "--squash", "--delete-branch"]);
+      return { status: 0, stdout: "Merged and squashed", stderr: "" };
+    };
+    const res = await squashPullRequest("/repo", 45, mockGh);
+    expect(res.ok).toBe(true);
+  });
+
+  test("falls back to --auto --squash if direct merge fails", async () => {
+    const { squashPullRequest } = await import("../src/git.ts");
+    let callCount = 0;
+    const mockGh: GhRunner = async (args) => {
+      callCount++;
+      if (args.includes("--auto")) {
+        expect(args).toEqual(["pr", "merge", "45", "--squash", "--auto", "--delete-branch"]);
+        return { status: 0, stdout: "Auto-merge set", stderr: "" };
+      }
+      return { status: 1, stdout: "", stderr: "checks in progress" };
+    };
+    const res = await squashPullRequest("/repo", 45, mockGh);
+    expect(res.ok).toBe(true);
+    expect(callCount).toBe(2);
+  });
+
+  test("returns error when merge fails", async () => {
+    const { squashPullRequest } = await import("../src/git.ts");
+    const mockGh: GhRunner = async () => {
+      return { status: 1, stdout: "", stderr: "Merge conflict" };
+    };
+    const res = await squashPullRequest("/repo", 45, mockGh);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("Merge conflict");
+  });
+});
+
+describe("waitForTicketClosed", () => {
+  test("returns true immediately if ticket is already closed", async () => {
+    const { waitForTicketClosed } = await import("../src/git.ts");
+    const mockGh: GhRunner = async (args) => {
+      expect(args).toEqual(["issue", "view", "77", "--json", "state,closed"]);
+      return { status: 0, stdout: JSON.stringify({ state: "CLOSED", closed: true }), stderr: "" };
+    };
+    const res = await waitForTicketClosed("/repo", 77, mockGh, 500, 50);
+    expect(res).toBe(true);
+  });
+
+  test("waits until ticket closes across multiple polls", async () => {
+    const { waitForTicketClosed } = await import("../src/git.ts");
+    let count = 0;
+    const mockGh: GhRunner = async () => {
+      count++;
+      if (count < 3) {
+        return { status: 0, stdout: JSON.stringify({ state: "OPEN", closed: false }), stderr: "" };
+      }
+      return { status: 0, stdout: JSON.stringify({ state: "CLOSED", closed: true }), stderr: "" };
+    };
+    const res = await waitForTicketClosed("/repo", 77, mockGh, 1000, 20);
+    expect(res).toBe(true);
+    expect(count).toBeGreaterThanOrEqual(3);
+  });
+
+  test("returns false when ticket does not close within timeout", async () => {
+    const { waitForTicketClosed } = await import("../src/git.ts");
+    const mockGh: GhRunner = async () => {
+      return { status: 0, stdout: JSON.stringify({ state: "OPEN", closed: false }), stderr: "" };
+    };
+    const res = await waitForTicketClosed("/repo", 77, mockGh, 60, 20);
+    expect(res).toBe(false);
+  });
+});
+

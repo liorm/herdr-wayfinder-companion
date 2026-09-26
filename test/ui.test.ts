@@ -234,14 +234,17 @@ describe("reveal", () => {
 });
 
 describe("keyFromPress", () => {
-  test("maps arrows, enter, quit characters, and ctrl-c", () => {
+  test("maps arrows, enter, quit characters, ctrl-c, and ctrl-w", () => {
     expect(keyFromPress(undefined, { name: "up" })).toEqual({ kind: "up" });
     expect(keyFromPress(undefined, { name: "down" })).toEqual({ kind: "down" });
     expect(keyFromPress("\r", { name: "return" })).toEqual({ kind: "enter" });
     expect(keyFromPress("\x1b", { name: "escape" })).toEqual({ kind: "escape" });
     expect(keyFromPress("\x03", { name: "c", ctrl: true })).toEqual({ kind: "ctrl-c" });
+    expect(keyFromPress("\x17", { name: "w", ctrl: true })).toEqual({ kind: "ctrl-w" });
+    expect(keyFromPress("\x17", undefined)).toEqual({ kind: "ctrl-w" });
     expect(keyFromPress("q", { name: "q" })).toEqual({ kind: "char", value: "q" });
     expect(keyFromPress("j", { name: "j" })).toEqual({ kind: "char", value: "j" });
     expect(keyFromPress("w", { name: "w" })).toEqual({ kind: "char", value: "w" });
   });
 });
+

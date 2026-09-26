@@ -5,7 +5,7 @@ import { formatMarkdown } from "./markdown.ts";
 import { terminalLink } from "./link.ts";
 
 /** Ticket view footer. `q` closes the whole plugin, so it is not a ticket shortcut. */
-export const TICKET_FOOTER = "j/k scroll   esc back   o open   w work";
+export const TICKET_FOOTER = "j/k scroll   esc back   o open   w work   ^w dialog";
 
 export interface IssueViewFields {
   [key: string]: string;

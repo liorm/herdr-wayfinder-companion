@@ -4,6 +4,7 @@ export type InputKey =
   | { kind: "enter" }
   | { kind: "escape" }
   | { kind: "ctrl-c" }
+  | { kind: "ctrl-w" }
   | { kind: "char"; value: string };
 
 export function keyFromPress(
@@ -11,6 +12,7 @@ export function keyFromPress(
   key: { name?: string; ctrl?: boolean } | undefined,
 ): InputKey | undefined {
   if (key?.ctrl && key.name === "c") return { kind: "ctrl-c" };
+  if ((key?.ctrl && key.name === "w") || str === "\x17") return { kind: "ctrl-w" };
   if (key?.name === "up") return { kind: "up" };
   if (key?.name === "down") return { kind: "down" };
   if (key?.name === "return" || key?.name === "enter") return { kind: "enter" };
@@ -20,3 +22,4 @@ export function keyFromPress(
   }
   return undefined;
 }
+

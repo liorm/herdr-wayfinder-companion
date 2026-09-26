@@ -18,6 +18,12 @@ import {
   runDeliveryWorkflow,
   type DeliveryState,
 } from "../wayfinder/delivery.ts";
+import {
+  canDeliverMap,
+  createInitialMapDeliveryState,
+  runMapDeliveryWorkflow,
+  type MapDeliveryState,
+} from "../wayfinder/map-delivery.ts";
 import { findTicketPR, openInBrowser, type GitRunner, type PRInfo } from "../git.ts";
 import { preserveSelection, reveal } from "./render.ts";
 import { formatTicketView } from "./ticket.ts";
@@ -26,6 +32,7 @@ import { DetailView } from "./components/DetailView.tsx";
 import { MessageView } from "./components/MessageView.tsx";
 import { ErrorDialog } from "./components/ErrorDialog.tsx";
 import { DeliveryDialog } from "./components/DeliveryDialog.tsx";
+import { MapDeliveryDialog } from "./components/MapDeliveryDialog.tsx";
 import { ModelDialog } from "./components/ModelDialog.tsx";
 import { createErrorDialog, type DialogState } from "./dialog.ts";
 import { refreshBoardState } from "./issues.tsx";
@@ -55,7 +62,9 @@ export interface AppProps {
   };
   initialError?: DialogState;
   initialDelivery?: DeliveryState;
+  initialMapDelivery?: MapDeliveryState;
   runtime?: PluginRuntime;
+
   refreshIntervalMs?: number;
   fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
   fetchBranches?: (cwd: string) => Promise<string[]>;
@@ -77,6 +86,7 @@ export const App: React.FC<AppProps> = ({
   initialMessage,
   initialError,
   initialDelivery,
+  initialMapDelivery,
   runtime,
   refreshIntervalMs = 5000,
   fetchSibling = resolveSiblingAgent,
@@ -112,6 +122,7 @@ export const App: React.FC<AppProps> = ({
   const [branches, setBranches] = useState<Record<number, string>>(initialBranches);
   const [prs, setPrs] = useState<Record<number, PRInfo>>(initialPrs);
   const [deliveryDialog, setDeliveryDialog] = useState<DeliveryState | null>(initialDelivery ?? null);
+  const [mapDeliveryDialog, setMapDeliveryDialog] = useState<MapDeliveryState | null>(initialMapDelivery ?? null);
 
   const initialArranged = selectableIssues(boardRows(initialIssues, { branches: initialBranches, prs: initialPrs }));
   const [mode, setMode] = useState<"list" | "detail" | "message">(
@@ -293,7 +304,7 @@ export const App: React.FC<AppProps> = ({
     [issues, selected, scroll, listWindow, branches, prs],
   );
 
-  const handleWorkPress = async (targetIssue: Issue) => {
+  const handleWorkDialogPress = async (targetIssue: Issue) => {
     if (isIssueBlocked(targetIssue, issues)) {
       showError(`Ticket #${targetIssue.number} is blocked.`, "Action Blocked");
       return;
@@ -324,6 +335,40 @@ export const App: React.FC<AppProps> = ({
       return;
     }
 
+    if (kind === "map") {
+      const check = canDeliverMap(targetIssue, issues);
+      if (!check.canDeliver) {
+        showError(check.reason ?? `Map #${targetIssue.number} is not ready for delivery.`, "Map Delivery Not Ready");
+        return;
+      }
+      setMapDeliveryDialog(
+        createInitialMapDeliveryState(targetIssue, check.subtickets),
+      );
+      return;
+    }
+
+    showError(
+      `Work dialog is only available for delivery tickets and map tickets with delivery subtickets. Ticket #${targetIssue.number} is ${kind}.`,
+      "Work Dialog",
+    );
+  };
+
+  const handleWorkPress = async (targetIssue: Issue) => {
+    if (isIssueBlocked(targetIssue, issues)) {
+      showError(`Ticket #${targetIssue.number} is blocked.`, "Action Blocked");
+      return;
+    }
+    if (!sibling || sibling.status !== "idle") {
+      const statusText = sibling?.status ? ` (${sibling.status})` : " (unavailable)";
+      showError(`Agent is not idle${statusText}.`, "Agent Busy");
+      return;
+    }
+
+    const kind = ticketKind(targetIssue.labels);
+    if (kind === "delivery") {
+      return handleWorkDialogPress(targetIssue);
+    }
+
     setNotice(`Starting work on #${targetIssue.number}…`);
     const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
     const result = await dispatchWork(targetIssue, sibling, client, {
@@ -339,6 +384,7 @@ export const App: React.FC<AppProps> = ({
       setNotice(result.message);
     }
   };
+
 
   useInput(async (input, key) => {
     if (key.ctrl && input === "c") {
@@ -496,6 +542,108 @@ export const App: React.FC<AppProps> = ({
       return;
     }
 
+    if (mapDeliveryDialog) {
+      if (mapDeliveryDialog.isFinished || mapDeliveryDialog.error) {
+        if (
+          key.return ||
+          key.escape ||
+          input === " " ||
+          input === "q" ||
+          input === "Q"
+        ) {
+          setMapDeliveryDialog(null);
+          if (cwd) {
+            refreshBoardState(cwd, stateRef.current, runtime, fetchSibling, fetchBranches)
+              .then(({ loaded, sibling: newSibling, branches: newBranches }) => {
+                if (newSibling !== undefined) setSibling(newSibling);
+                if (newBranches) setBranches(newBranches);
+                if (loaded.ok) {
+                  const prevNumber = issuesRef.current[selectedRef.current]?.number;
+                  const currentSel = selectedRef.current;
+                  const nextArranged = selectableIssues(
+                    boardRows(loaded.issues, { branches: newBranches, prs: prsRef.current }),
+                  );
+                  const newSel = preserveSelection(nextArranged, currentSel, prevNumber);
+                  setRepo(loaded.repo);
+                  setIssues(nextArranged);
+                  setSelected(newSel);
+                }
+              })
+              .catch(() => {});
+          }
+          return;
+        }
+        return;
+      }
+
+      if (!mapDeliveryDialog.isStarted) {
+        if (key.return || input === " ") {
+          const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
+          const targetSibling = sibling;
+          if (!targetSibling || targetSibling.status !== "idle") {
+            setMapDeliveryDialog((prev) =>
+              prev ? { ...prev, error: "Agent is no longer idle", isFinished: true } : null,
+            );
+            return;
+          }
+          if (!cwd) {
+            setMapDeliveryDialog((prev) =>
+              prev ? { ...prev, error: "No repository working directory found", isFinished: true } : null,
+            );
+            return;
+          }
+
+          setMapDeliveryDialog((prev) => (prev ? { ...prev, isStarted: true } : null));
+
+          runMapDeliveryWorkflow({
+            cwd,
+            mapIssue: mapDeliveryDialog.mapIssue,
+            subtickets: mapDeliveryDialog.steps.map((s) => s.issue),
+            sibling: targetSibling,
+            client,
+            configDir: runtime?.configDir,
+            customModels,
+            runGit,
+            runGh,
+            onUpdate: (nextState) => {
+              setMapDeliveryDialog(nextState);
+            },
+          })
+            .then((finalState) => {
+              const newPrs: Record<number, PRInfo> = {};
+              for (const step of finalState.steps) {
+                if (step.pr) {
+                  newPrs[step.issue.number] = step.pr;
+                }
+              }
+              if (Object.keys(newPrs).length > 0) {
+                setPrs((prev) => ({ ...prev, ...newPrs }));
+              }
+            })
+            .catch((err) => {
+              setMapDeliveryDialog((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      error: err instanceof Error ? err.message : String(err),
+                      isFinished: true,
+                    }
+                  : null,
+              );
+            });
+          return;
+        }
+        if (key.escape || input === "q" || input === "Q") {
+          setMapDeliveryDialog(null);
+          return;
+        }
+        return;
+      }
+
+      // If map delivery workflow is running, ignore other keystrokes
+      return;
+    }
+
     if (input === "q" || input === "Q") {
       exit();
       return;
@@ -511,6 +659,13 @@ export const App: React.FC<AppProps> = ({
           keyObj.name === "return")) ||
       input === "M";
     const isRotateM = !key.ctrl && input === "m";
+    const isCtrlW =
+      (key.ctrl &&
+        (keyObj.name === "w" ||
+          input === "w" ||
+          input === "\x17")) ||
+      input === "\x17";
+    const isNormalW = !key.ctrl && (input === "w" || input === "W");
 
     if (mode === "message") {
       if (key.escape) {
@@ -546,7 +701,12 @@ export const App: React.FC<AppProps> = ({
         setDetailScroll((prev) => Math.max(0, prev - detailWindow));
         return;
       }
-      if (input === "w" || input === "W") {
+      if (isCtrlW) {
+        if (!detailIssue) return;
+        await handleWorkDialogPress(detailIssue);
+        return;
+      }
+      if (isNormalW) {
         if (!detailIssue) return;
         await handleWorkPress(detailIssue);
         return;
@@ -609,7 +769,13 @@ export const App: React.FC<AppProps> = ({
         moveSelection(1);
         return;
       }
-      if (input === "w" || input === "W") {
+      if (isCtrlW) {
+        const currentIssue = issues[selected];
+        if (!currentIssue) return;
+        await handleWorkDialogPress(currentIssue);
+        return;
+      }
+      if (isNormalW) {
         const currentIssue = issues[selected];
         if (!currentIssue) return;
         await handleWorkPress(currentIssue);
@@ -814,6 +980,22 @@ export const App: React.FC<AppProps> = ({
           agentMessage={deliveryDialog.agentMessage}
           pr={deliveryDialog.pr}
           error={deliveryDialog.error}
+          columns={dimensions.columns}
+          rows={dimensions.rows}
+        />
+      ) : null}
+
+      {mapDeliveryDialog ? (
+        <MapDeliveryDialog
+          mapIssue={mapDeliveryDialog.mapIssue}
+          steps={mapDeliveryDialog.steps}
+          currentStepIndex={mapDeliveryDialog.currentStepIndex}
+          currentIssue={mapDeliveryDialog.currentIssue}
+          isStarted={mapDeliveryDialog.isStarted}
+          isFinished={mapDeliveryDialog.isFinished}
+          modifiedFiles={mapDeliveryDialog.modifiedFiles}
+          agentMessage={mapDeliveryDialog.agentMessage}
+          error={mapDeliveryDialog.error}
           columns={dimensions.columns}
           rows={dimensions.rows}
         />

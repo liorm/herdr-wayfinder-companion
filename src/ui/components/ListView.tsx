@@ -137,7 +137,7 @@ export const ListView: React.FC<ListViewProps> = ({
         {visibleRows}
       </Box>
       <Box width={columns}>
-        <Text dimColor>{clip("j/k move   enter view   o open   w work   m model   f filter   r refresh   q close", columns)}</Text>
+        <Text dimColor>{clip("j/k move   enter view   o open   w work   ^w dialog   m model   f filter   r refresh   q close", columns)}</Text>
       </Box>
     </Box>
   );
