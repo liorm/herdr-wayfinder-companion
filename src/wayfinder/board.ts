@@ -198,6 +198,13 @@ export function isIssueBlocked(issue: Issue, all: Issue[]): boolean {
   return blockerNumbers(issue.body).some((number) => openNumbers.has(number));
 }
 
+export function getOpenBlockers(issue: Issue, all: Issue[]): number[] {
+  if (issue.closed) return [];
+  const openNumbers = new Set(all.filter((item) => !item.closed).map((item) => item.number));
+  return blockerNumbers(issue.body).filter((number) => openNumbers.has(number));
+}
+
+
 function getOptionBranch(options: BoardOptions | undefined, issueNumber: number): string | undefined {
   if (!options?.branches) return undefined;
   if (options.branches instanceof Map) return options.branches.get(issueNumber);

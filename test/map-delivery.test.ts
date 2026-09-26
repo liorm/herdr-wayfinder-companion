@@ -363,4 +363,147 @@ describe("runMapDeliveryWorkflow", () => {
     expect(result.error).toContain("Ticket #11 was not closed on GitHub after squashing");
     expect(result.steps[0]!.status).toBe("failed");
   });
+
+  test("stops immediately without running work if a candidate subticket is blocked", async () => {
+    const blockerTicket: Issue = {
+      number: 999,
+      title: "External uncompleted prerequisite",
+      url: "https://github.com/example/repo/issues/999",
+      labels: [],
+      assignees: [],
+      closed: false,
+    };
+    const blockedSubticket: Issue = {
+      number: 14,
+      title: "Dependent feature",
+      url: "https://github.com/example/repo/issues/14",
+      labels: ["ready-for-agent"],
+      assignees: [],
+      closed: false,
+      body: "Part of #10\nBlocked by: #999",
+    };
+
+    const mockHerdr = async (): Promise<HerdrCall> => ({ ok: true, status: 0, stdout: "", stderr: "", json: null });
+    const mockGit: GitRunner = async () => ({ status: 0, stdout: "", stderr: "" });
+    const mockGh: GhRunner = async () => ({ status: 0, stdout: "", stderr: "" });
+
+    const result = await runMapDeliveryWorkflow({
+      cwd: "/repo",
+      mapIssue,
+      subtickets: [blockedSubticket],
+      allIssues: [mapIssue, blockerTicket, blockedSubticket],
+      sibling: idleSibling,
+      client: mockHerdr,
+      runGit: mockGit,
+      runGh: mockGh,
+    });
+
+    expect(result.isFinished).toBe(true);
+    expect(result.error).toContain("Ticket #14 is blocked");
+    expect(result.error).toContain("#999");
+    expect(result.steps[0]!.status).toBe("failed");
+  });
+
+  test("dynamically recalculates DAG order as tickets close", async () => {
+    // Ticket 20 has no blockers. Ticket 21 depends on Ticket 20. Ticket 22 depends on Ticket 21.
+    const ticket20: Issue = {
+      number: 20,
+      title: "Base setup",
+      url: "https://github.com/example/repo/issues/20",
+      labels: ["ready-for-agent"],
+      assignees: [],
+      closed: false,
+      body: "Part of #10",
+    };
+    const ticket21: Issue = {
+      number: 21,
+      title: "Middle layer",
+      url: "https://github.com/example/repo/issues/21",
+      labels: ["ready-for-agent"],
+      assignees: [],
+      closed: false,
+      body: "Part of #10\nBlocked by: #20",
+    };
+    const ticket22: Issue = {
+      number: 22,
+      title: "Top layer",
+      url: "https://github.com/example/repo/issues/22",
+      labels: ["ready-for-agent"],
+      assignees: [],
+      closed: false,
+      body: "Part of #10\nBlocked by: #21",
+    };
+
+    const executionOrder: number[] = [];
+
+    const mockHerdr = async (args: string[]): Promise<HerdrCall> => {
+      if (args[0] === "agent" && args[1] === "prompt") {
+        const prompt = args[3] ?? "";
+        const match = prompt.match(/\/implement (\d+)/);
+        if (match) {
+          executionOrder.push(Number(match[1]));
+        }
+        return { ok: true, status: 0, stdout: "", stderr: "", json: { status: "ok" } };
+      }
+      if (args[0] === "agent" && args[1] === "get") {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: { result: { agent: { agent_status: "idle", title: "Ready" } } },
+        };
+      }
+      return { ok: true, status: 0, stdout: "", stderr: "", json: {} };
+    };
+
+    const mockGit: GitRunner = async () => ({ status: 0, stdout: "", stderr: "" });
+    const mockGh: GhRunner = async (args) => {
+      if (args[0] === "pr" && args[1] === "list") {
+        const head = args[args.indexOf("--head") + 1] ?? "";
+        const num = head.split("-")[0];
+        return {
+          status: 0,
+          stdout: JSON.stringify([
+            {
+              number: 200 + Number(num),
+              title: `PR ${num}`,
+              url: `https://github.com/example/repo/pull/${200 + Number(num)}`,
+              state: "open",
+              headRefName: `${num}-branch`,
+            },
+          ]),
+          stderr: "",
+        };
+      }
+      if (args[0] === "pr" && args[1] === "merge") {
+        return { status: 0, stdout: "Merged", stderr: "" };
+      }
+      if (args[0] === "issue" && args[1] === "view") {
+        return { status: 0, stdout: JSON.stringify({ state: "CLOSED", closed: true }), stderr: "" };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    };
+
+    // Provide them in reverse order to verify topological recalculation picks them in 20 -> 21 -> 22 order
+    const result = await runMapDeliveryWorkflow({
+      cwd: "/repo",
+      mapIssue,
+      subtickets: [ticket22, ticket21, ticket20],
+      allIssues: [mapIssue, ticket22, ticket21, ticket20],
+      sibling: idleSibling,
+      client: mockHerdr,
+      runGit: mockGit,
+      runGh: mockGh,
+      pollIntervalMs: 5,
+      startupGraceMs: 1,
+      maxWaitMs: 100,
+      closeMaxWaitMs: 100,
+    });
+
+    expect(result.isFinished).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(executionOrder).toEqual([20, 21, 22]);
+  });
 });
+

@@ -1,7 +1,7 @@
 import type { Issue } from "../github/issues.ts";
 import { herdrErrorMessage, type HerdrCall } from "../herdr.ts";
 import type { SiblingAgent } from "../sibling.ts";
-import { ticketKind } from "./board.ts";
+import { getOpenBlockers, isIssueBlocked, ticketKind } from "./board.ts";
 import { getModelForTicketKind, type ModelResolutionOptions } from "./models.ts";
 
 export interface WorkResult {
@@ -12,7 +12,16 @@ export interface WorkResult {
 
 export interface WorkOptions extends ModelResolutionOptions {
   model?: string;
+  allIssues?: Issue[];
+  cwd?: string;
+  runGit?: import("../git.ts").GitRunner;
+  runGh?: import("../github/issues.ts").GhRunner;
+  onUpdate?: (state: import("./delivery.ts").DeliveryState) => void;
+  pollIntervalMs?: number;
+  startupGraceMs?: number;
+  maxWaitMs?: number;
 }
+
 
 export async function handleWorkMap(
   issue: Issue,
@@ -48,17 +57,6 @@ export async function handleWorkMap(
     ok: true,
     message: `Started work on map #${issue.number}`,
   };
-}
-
-export interface WorkOptions extends ModelResolutionOptions {
-  model?: string;
-  cwd?: string;
-  runGit?: import("../git.ts").GitRunner;
-  runGh?: import("../github/issues.ts").GhRunner;
-  onUpdate?: (state: import("./delivery.ts").DeliveryState) => void;
-  pollIntervalMs?: number;
-  startupGraceMs?: number;
-  maxWaitMs?: number;
 }
 
 export async function handleWorkGrilling(
@@ -108,6 +106,12 @@ export async function handleWorkDelivery(
     return { ok: false, message: "No sibling agent target found" };
   }
 
+  if (options?.allIssues && isIssueBlocked(issue, options.allIssues)) {
+    const blockers = getOpenBlockers(issue, options.allIssues);
+    const blockerList = blockers.length > 0 ? ` (blocked by #${blockers.join(", #")})` : "";
+    return { ok: false, message: `Ticket #${issue.number} is blocked${blockerList}. Delivery cannot proceed.` };
+  }
+
   const { runDeliveryWorkflow } = await import("./delivery.ts");
   const cwd = options?.cwd ?? sibling.cwd ?? process.cwd();
   const res = await runDeliveryWorkflow({
@@ -115,6 +119,7 @@ export async function handleWorkDelivery(
     issue,
     sibling,
     client,
+    allIssues: options?.allIssues,
     agent: options?.agent ?? sibling.agent,
     model: options?.model,
     configDir: options?.configDir,
@@ -157,6 +162,12 @@ export async function dispatchWork(
     return { ok: false, message: `Agent is not idle ${status}` };
   }
 
+  if (options?.allIssues && isIssueBlocked(issue, options.allIssues)) {
+    const blockers = getOpenBlockers(issue, options.allIssues);
+    const blockerList = blockers.length > 0 ? ` (blocked by #${blockers.join(", #")})` : "";
+    return { ok: false, message: `Ticket #${issue.number} is blocked${blockerList}.` };
+  }
+
   const kind = ticketKind(issue.labels);
   switch (kind) {
     case "map":
@@ -176,3 +187,4 @@ export async function dispatchWork(
       return handleWorkOther(issue, sibling, client, options);
   }
 }
+

@@ -10,7 +10,7 @@ import {
 } from "../git.ts";
 import type { HerdrCall } from "../herdr.ts";
 import type { SiblingAgent } from "../sibling.ts";
-import { parentMapNumber, sortChildren, ticketKind } from "./board.ts";
+import { getOpenBlockers, isIssueBlocked, parentMapNumber, sortChildren, ticketKind } from "./board.ts";
 import {
   runDeliveryWorkflow,
   type DeliveryState,
@@ -133,6 +133,7 @@ export interface MapDeliveryWorkflowOptions extends ModelResolutionOptions {
   subtickets: Issue[];
   sibling: SiblingAgent;
   client: (args: string[]) => Promise<HerdrCall>;
+  allIssues?: Issue[];
   model?: string;
   runGit?: GitRunner;
   runGh?: GhRunner;
@@ -146,9 +147,11 @@ export interface MapDeliveryWorkflowOptions extends ModelResolutionOptions {
 
 /**
  * Executes delivery sequentially for each subticket:
- * 1. Runs delivery workflow for the subticket (shares exact delivery work code).
- * 2. Squashes the created PR via GitHub CLI.
- * 3. Waits until the ticket is confirmed closed on GitHub before moving to next.
+ * 1. Dynamically recalculates the DAG among remaining open subtickets to pick the next unblocked ticket.
+ * 2. Gates against blocked tickets: NEVER implements a blocked ticket.
+ * 3. Runs delivery workflow for the subticket (shares exact delivery work code).
+ * 4. Squashes the created PR via GitHub CLI.
+ * 5. Waits until the ticket is confirmed closed on GitHub before moving to next.
  */
 export async function runMapDeliveryWorkflow(
   options: MapDeliveryWorkflowOptions,
@@ -169,6 +172,16 @@ export async function runMapDeliveryWorkflow(
     closeMaxWaitMs = 30_000,
   } = options;
 
+  // Build a working set of issues to track closed state dynamically
+  const issueMap = new Map<number, Issue>();
+  for (const item of options.allIssues ?? []) {
+    issueMap.set(item.number, item);
+  }
+  for (const item of subtickets) {
+    issueMap.set(item.number, item);
+  }
+  let currentIssues = [...issueMap.values()];
+
   let state: MapDeliveryState = {
     mapIssue,
     steps: subtickets.map((sub) => ({
@@ -185,26 +198,59 @@ export async function runMapDeliveryWorkflow(
     onUpdate?.(state);
   };
 
-  for (let i = 0; i < state.steps.length; i++) {
-    const step = state.steps[i]!;
-    if (step.status === "completed") {
-      continue;
+  while (true) {
+    // Find all remaining open subtickets
+    const openSubtickets = currentIssues.filter(
+      (issue) => subtickets.some((sub) => sub.number === issue.number) && !issue.closed,
+    );
+
+    if (openSubtickets.length === 0) {
+      break;
     }
 
-    state.steps = state.steps.map((s, idx) =>
-      idx === i ? { ...s, status: "running" } : s,
-    );
+    // Recalculate DAG for remaining open subtickets based on current closed states
+    const sortedOpen = sortChildren(openSubtickets, currentIssues);
+    const nextCandidate = sortedOpen[0]!;
+
+    // Gate: NEVER implement a blocked ticket
+    if (isIssueBlocked(nextCandidate, currentIssues)) {
+      const blockers = getOpenBlockers(nextCandidate, currentIssues);
+      const blockerList = blockers.length > 0 ? ` (blocked by #${blockers.join(", #")})` : "";
+      const errorMsg = `Ticket #${nextCandidate.number} is blocked${blockerList}. Sequential delivery stopped.`;
+
+      const stepIdx = state.steps.findIndex((s) => s.issue.number === nextCandidate.number);
+      if (stepIdx >= 0) {
+        state.steps = state.steps.map((s, idx) =>
+          idx === stepIdx ? { ...s, status: "failed", error: errorMsg } : s,
+        );
+      }
+      update({
+        error: errorMsg,
+        isFinished: true,
+        currentStepIndex: undefined,
+        currentIssue: undefined,
+      });
+      return state;
+    }
+
+    const stepIdx = state.steps.findIndex((s) => s.issue.number === nextCandidate.number);
+    if (stepIdx >= 0) {
+      state.steps = state.steps.map((s, idx) =>
+        idx === stepIdx ? { ...s, status: "running" } : s,
+      );
+    }
     update({
-      currentStepIndex: i,
-      currentIssue: step.issue,
-      agentMessage: `Starting delivery for #${step.issue.number}...`,
+      currentStepIndex: stepIdx >= 0 ? stepIdx : undefined,
+      currentIssue: nextCandidate,
+      agentMessage: `Starting delivery for #${nextCandidate.number}...`,
     });
 
     const deliveryResult = await runDeliveryWorkflow({
       cwd,
-      issue: step.issue,
+      issue: nextCandidate,
       sibling,
       client,
+      allIssues: currentIssues,
       agent: options.agent ?? sibling.agent,
       model: options.model,
       configDir: options.configDir,
@@ -216,9 +262,11 @@ export async function runMapDeliveryWorkflow(
       startupGraceMs,
       prMaxWaitMs,
       onUpdate: (dState) => {
-        state.steps = state.steps.map((s, idx) =>
-          idx === i ? { ...s, deliveryState: dState } : s,
-        );
+        if (stepIdx >= 0) {
+          state.steps = state.steps.map((s, idx) =>
+            idx === stepIdx ? { ...s, deliveryState: dState } : s,
+          );
+        }
         update({
           modifiedFiles: dState.modifiedFiles,
           agentMessage: dState.agentMessage,
@@ -229,10 +277,12 @@ export async function runMapDeliveryWorkflow(
     if (deliveryResult.error || !deliveryResult.pr) {
       const errorMsg =
         deliveryResult.error ??
-        `Delivery workflow failed for ticket #${step.issue.number}`;
-      state.steps = state.steps.map((s, idx) =>
-        idx === i ? { ...s, status: "failed", error: errorMsg, deliveryState: deliveryResult } : s,
-      );
+        `Delivery workflow failed for ticket #${nextCandidate.number}`;
+      if (stepIdx >= 0) {
+        state.steps = state.steps.map((s, idx) =>
+          idx === stepIdx ? { ...s, status: "failed", error: errorMsg, deliveryState: deliveryResult } : s,
+        );
+      }
       update({
         error: errorMsg,
         isFinished: true,
@@ -243,22 +293,26 @@ export async function runMapDeliveryWorkflow(
     }
 
     const pr = deliveryResult.pr;
-    state.steps = state.steps.map((s, idx) =>
-      idx === i ? { ...s, pr, deliveryState: deliveryResult } : s,
-    );
+    if (stepIdx >= 0) {
+      state.steps = state.steps.map((s, idx) =>
+        idx === stepIdx ? { ...s, pr, deliveryState: deliveryResult } : s,
+      );
+    }
 
     // Squash PR
     update({
-      agentMessage: `Squashing PR #${pr.number} for ticket #${step.issue.number}...`,
+      agentMessage: `Squashing PR #${pr.number} for ticket #${nextCandidate.number}...`,
     });
     const squashResult = await squashPullRequest(cwd, pr.number, runGh);
     if (!squashResult.ok) {
       const errorMsg =
         squashResult.error ??
-        `Failed to squash PR #${pr.number} for ticket #${step.issue.number}`;
-      state.steps = state.steps.map((s, idx) =>
-        idx === i ? { ...s, status: "failed", error: errorMsg } : s,
-      );
+        `Failed to squash PR #${pr.number} for ticket #${nextCandidate.number}`;
+      if (stepIdx >= 0) {
+        state.steps = state.steps.map((s, idx) =>
+          idx === stepIdx ? { ...s, status: "failed", error: errorMsg } : s,
+        );
+      }
       update({
         error: errorMsg,
         isFinished: true,
@@ -270,26 +324,28 @@ export async function runMapDeliveryWorkflow(
 
     // Wait for ticket to be closed on GitHub
     update({
-      agentMessage: `Waiting for ticket #${step.issue.number} to be closed on GitHub...`,
+      agentMessage: `Waiting for ticket #${nextCandidate.number} to be closed on GitHub...`,
     });
     const closed = await waitForTicketClosed(
       cwd,
-      step.issue.number,
+      nextCandidate.number,
       runGh,
       closeMaxWaitMs,
       pollIntervalMs,
       () => {
         update({
-          agentMessage: `Waiting for ticket #${step.issue.number} to be closed on GitHub...`,
+          agentMessage: `Waiting for ticket #${nextCandidate.number} to be closed on GitHub...`,
         });
       },
     );
 
     if (!closed) {
-      const errorMsg = `Ticket #${step.issue.number} was not closed on GitHub after squashing PR #${pr.number}`;
-      state.steps = state.steps.map((s, idx) =>
-        idx === i ? { ...s, status: "failed", error: errorMsg } : s,
-      );
+      const errorMsg = `Ticket #${nextCandidate.number} was not closed on GitHub after squashing PR #${pr.number}`;
+      if (stepIdx >= 0) {
+        state.steps = state.steps.map((s, idx) =>
+          idx === stepIdx ? { ...s, status: "failed", error: errorMsg } : s,
+        );
+      }
       update({
         error: errorMsg,
         isFinished: true,
@@ -299,12 +355,19 @@ export async function runMapDeliveryWorkflow(
       return state;
     }
 
-    // Step completed!
-    state.steps = state.steps.map((s, idx) =>
-      idx === i ? { ...s, status: "completed", error: undefined } : s,
+    // Mark closed in currentIssues so subsequent DAG recalculations reflect this!
+    currentIssues = currentIssues.map((item) =>
+      item.number === nextCandidate.number ? { ...item, closed: true } : item,
     );
+
+    // Step completed!
+    if (stepIdx >= 0) {
+      state.steps = state.steps.map((s, idx) =>
+        idx === stepIdx ? { ...s, status: "completed", error: undefined } : s,
+      );
+    }
     update({
-      agentMessage: `Ticket #${step.issue.number} squashed and closed.`,
+      agentMessage: `Ticket #${nextCandidate.number} squashed and closed.`,
       modifiedFiles: [],
     });
   }
@@ -312,10 +375,10 @@ export async function runMapDeliveryWorkflow(
   update({
     isFinished: true,
     currentStepIndex: undefined,
-    currentIssue: undefined,
-    agentMessage: undefined,
     modifiedFiles: [],
   });
 
   return state;
 }
+
+

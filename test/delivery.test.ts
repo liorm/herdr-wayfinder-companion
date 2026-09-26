@@ -484,4 +484,37 @@ describe("runDeliveryWorkflow", () => {
     expect(state.steps[4]?.status).toBe("failed");
     expect(state.pr).toBeUndefined();
   });
+
+  test("fails immediately if issue is blocked when allIssues is provided", async () => {
+    const blockerIssue: Issue = {
+      number: 50,
+      title: "Prerequisite database migration",
+      url: "https://github.com/example/repo/issues/50",
+      labels: [],
+      assignees: [],
+      closed: false,
+    };
+    const blockedDeliveryIssue: Issue = {
+      ...sampleDeliveryIssue,
+      body: "Blocked by: #50",
+    };
+
+    const mockHerdr = async (): Promise<HerdrCall> => ({ ok: true, status: 0, stdout: "", stderr: "", json: null });
+    const mockGit: GitRunner = async () => ({ status: 0, stdout: "", stderr: "" });
+
+    const state = await runDeliveryWorkflow({
+      cwd: "/fake/repo",
+      issue: blockedDeliveryIssue,
+      allIssues: [blockerIssue, blockedDeliveryIssue],
+      sibling: idleSibling,
+      client: mockHerdr,
+      runGit: mockGit,
+    });
+
+    expect(state.isFinished).toBe(true);
+    expect(state.error).toContain("blocked");
+    expect(state.error).toContain("#50");
+    expect(state.steps.every((s) => s.status === "pending")).toBe(true);
+  });
 });
+

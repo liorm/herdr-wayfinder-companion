@@ -375,6 +375,7 @@ export const App: React.FC<AppProps> = ({
       agent: sibling?.agent,
       configDir: runtime?.configDir,
       customModels,
+      allIssues: issues,
     });
     if (result.notImplemented) {
       showError(result.message, "Not Implemented");
@@ -502,6 +503,7 @@ export const App: React.FC<AppProps> = ({
             issue: deliveryDialog.issue,
             sibling: targetSibling,
             client,
+            allIssues: issues,
             configDir: runtime?.configDir,
             customModels,
             runGit,
@@ -599,6 +601,7 @@ export const App: React.FC<AppProps> = ({
             cwd,
             mapIssue: mapDeliveryDialog.mapIssue,
             subtickets: mapDeliveryDialog.steps.map((s) => s.issue),
+            allIssues: issues,
             sibling: targetSibling,
             client,
             configDir: runtime?.configDir,

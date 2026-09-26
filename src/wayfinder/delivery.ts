@@ -12,6 +12,7 @@ import {
 import { herdrErrorMessage, type HerdrCall } from "../herdr.ts";
 import type { SiblingAgent } from "../sibling.ts";
 import { getModelForTicketKind, type ModelResolutionOptions } from "./models.ts";
+import { getOpenBlockers, isIssueBlocked } from "./board.ts";
 
 export type DeliveryStepStatus = "pending" | "running" | "completed" | "failed";
 
@@ -101,6 +102,7 @@ export interface DeliveryWorkflowOptions extends ModelResolutionOptions {
   issue: Issue;
   sibling: SiblingAgent;
   client: (args: string[]) => Promise<HerdrCall>;
+  allIssues?: Issue[];
   model?: string;
   runGit?: GitRunner;
   runGh?: GhRunner;
@@ -110,6 +112,7 @@ export interface DeliveryWorkflowOptions extends ModelResolutionOptions {
   startupGraceMs?: number;
   prMaxWaitMs?: number;
 }
+
 
 export async function waitForAgentIdle(
   target: string,
@@ -276,6 +279,15 @@ export async function runDeliveryWorkflow(
 
   if (!target) {
     update({ error: "No sibling agent target found", isFinished: true });
+    return state;
+  }
+
+  // --- Gate: Never implement a blocked ticket ---
+  if (options.allIssues && isIssueBlocked(issue, options.allIssues)) {
+    const blockers = getOpenBlockers(issue, options.allIssues);
+    const blockerList = blockers.length > 0 ? ` (blocked by #${blockers.join(", #")})` : "";
+    const errorMsg = `Ticket #${issue.number} is blocked${blockerList}. Delivery cannot proceed.`;
+    update({ error: errorMsg, isFinished: true });
     return state;
   }
 
