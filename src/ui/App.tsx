@@ -5,19 +5,27 @@ import {
   nextIssueState,
   type Issue,
   type IssueState,
+  type GhRunner,
 } from "../github/issues.ts";
 import { getCachedIssues } from "../github/cache.ts";
 import { createClient, type HerdrCall } from "../herdr.ts";
 import type { PluginRuntime } from "../runtime.ts";
 import { resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
-import { boardRows, isIssueBlocked, lineOfSelection, selectableIssues } from "../wayfinder/board.ts";
+import { boardRows, isIssueBlocked, lineOfSelection, selectableIssues, ticketKind } from "../wayfinder/board.ts";
 import { dispatchWork } from "../wayfinder/work.ts";
+import {
+  createInitialDeliveryState,
+  runDeliveryWorkflow,
+  type DeliveryState,
+} from "../wayfinder/delivery.ts";
+import { findTicketPR, type GitRunner, type PRInfo } from "../git.ts";
 import { preserveSelection, reveal } from "./render.ts";
 import { formatTicketView } from "./ticket.ts";
 import { ListView } from "./components/ListView.tsx";
 import { DetailView } from "./components/DetailView.tsx";
 import { MessageView } from "./components/MessageView.tsx";
 import { ErrorDialog } from "./components/ErrorDialog.tsx";
+import { DeliveryDialog } from "./components/DeliveryDialog.tsx";
 import { createErrorDialog, type DialogState } from "./dialog.ts";
 import { refreshBoardState } from "./issues.tsx";
 
@@ -27,6 +35,8 @@ export interface AppProps {
   initialState?: IssueState;
   initialIssues?: Issue[];
   initialSibling?: SiblingAgent;
+  initialBranches?: Record<number, string>;
+  initialPrs?: Record<number, PRInfo>;
   initialRefresh?: boolean;
   initialMessage?: {
     title: string;
@@ -34,10 +44,14 @@ export interface AppProps {
     footer?: string;
   };
   initialError?: DialogState;
+  initialDelivery?: DeliveryState;
   runtime?: PluginRuntime;
   refreshIntervalMs?: number;
   fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
+  fetchBranches?: (cwd: string) => Promise<string[]>;
   herdrClient?: (args: string[]) => Promise<HerdrCall>;
+  runGit?: GitRunner;
+  runGh?: GhRunner;
 }
 
 export const App: React.FC<AppProps> = ({
@@ -46,13 +60,19 @@ export const App: React.FC<AppProps> = ({
   initialState = "open",
   initialIssues = [],
   initialSibling,
+  initialBranches = {},
+  initialPrs = {},
   initialRefresh = false,
   initialMessage,
   initialError,
+  initialDelivery,
   runtime,
   refreshIntervalMs = 5000,
   fetchSibling = resolveSiblingAgent,
+  fetchBranches,
   herdrClient,
+  runGit,
+  runGh,
 }) => {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -77,7 +97,11 @@ export const App: React.FC<AppProps> = ({
     };
   }, [stdout]);
 
-  const initialArranged = selectableIssues(boardRows(initialIssues));
+  const [branches, setBranches] = useState<Record<number, string>>(initialBranches);
+  const [prs, setPrs] = useState<Record<number, PRInfo>>(initialPrs);
+  const [deliveryDialog, setDeliveryDialog] = useState<DeliveryState | null>(initialDelivery ?? null);
+
+  const initialArranged = selectableIssues(boardRows(initialIssues, { branches: initialBranches, prs: initialPrs }));
   const [mode, setMode] = useState<"list" | "detail" | "message">(
     initialMessage ? "message" : "list",
   );
@@ -123,6 +147,10 @@ export const App: React.FC<AppProps> = ({
   issuesRef.current = issues;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const branchesRef = useRef(branches);
+  branchesRef.current = branches;
+  const prsRef = useRef(prs);
+  prsRef.current = prs;
   const refreshingRef = useRef(false);
 
   const listWindow = Math.max(dimensions.rows - 3, 1);
@@ -143,20 +171,24 @@ export const App: React.FC<AppProps> = ({
     let cancelled = false;
     (async () => {
       try {
-        const { loaded, sibling: newSibling } = await refreshBoardState(
+        const { loaded, sibling: newSibling, branches: newBranches } = await refreshBoardState(
           cwd,
           stateRef.current,
           runtime,
           fetchSibling,
+          fetchBranches,
         );
         if (cancelled) return;
         if (newSibling !== undefined) {
           setSibling(newSibling);
         }
+        if (newBranches) {
+          setBranches(newBranches);
+        }
         if (loaded.ok) {
           const prevNumber = issuesRef.current[selectedRef.current]?.number;
           const currentSel = selectedRef.current;
-          const nextArranged = selectableIssues(boardRows(loaded.issues));
+          const nextArranged = selectableIssues(boardRows(loaded.issues, { branches: newBranches, prs: prsRef.current }));
           const newSel = preserveSelection(nextArranged, currentSel, prevNumber);
           setRepo(loaded.repo);
           setIssues(nextArranged);
@@ -169,7 +201,7 @@ export const App: React.FC<AppProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [initialRefresh, cwd, runtime, fetchSibling]);
+  }, [initialRefresh, cwd, runtime, fetchSibling, fetchBranches]);
 
   // Background refresh
   useEffect(() => {
@@ -180,19 +212,23 @@ export const App: React.FC<AppProps> = ({
       refreshingRef.current = true;
       try {
         const currentState = stateRef.current;
-        const { loaded, sibling: newSibling } = await refreshBoardState(
+        const { loaded, sibling: newSibling, branches: newBranches } = await refreshBoardState(
           cwd,
           currentState,
           runtime,
           fetchSibling,
+          fetchBranches,
         );
         if (newSibling !== undefined) {
           setSibling(newSibling);
         }
+        if (newBranches) {
+          setBranches(newBranches);
+        }
         if (loaded.ok) {
           const prevNumber = issuesRef.current[selectedRef.current]?.number;
           const currentSel = selectedRef.current;
-          const nextArranged = selectableIssues(boardRows(loaded.issues));
+          const nextArranged = selectableIssues(boardRows(loaded.issues, { branches: newBranches, prs: prsRef.current }));
           const newSel = preserveSelection(nextArranged, currentSel, prevNumber);
           setRepo(loaded.repo);
           setIssues(nextArranged);
@@ -206,20 +242,57 @@ export const App: React.FC<AppProps> = ({
     }, refreshIntervalMs);
 
     return () => clearInterval(interval);
-  }, [cwd, refreshIntervalMs, runtime, fetchSibling]);
+  }, [cwd, refreshIntervalMs, runtime, fetchSibling, fetchBranches]);
 
   const moveSelection = useCallback(
     (delta: number) => {
       if (issues.length === 0) return;
       const nextSelected = Math.min(issues.length - 1, Math.max(0, selected + delta));
-      const laid = boardRows(issues);
+      const laid = boardRows(issues, { branches, prs });
       const line = lineOfSelection(laid, nextSelected);
       setSelected(nextSelected);
       setScroll(reveal(line, scroll, listWindow));
       setNotice(undefined);
     },
-    [issues, selected, scroll, listWindow],
+    [issues, selected, scroll, listWindow, branches, prs],
   );
+
+  const handleWorkPress = async (targetIssue: Issue) => {
+    if (isIssueBlocked(targetIssue, issues)) {
+      showError(`Ticket #${targetIssue.number} is blocked.`, "Action Blocked");
+      return;
+    }
+    if (!sibling || sibling.status !== "idle") {
+      const statusText = sibling?.status ? ` (${sibling.status})` : " (unavailable)";
+      showError(`Agent is not idle${statusText}.`, "Agent Busy");
+      return;
+    }
+
+    const kind = ticketKind(targetIssue.labels);
+    if (kind === "delivery") {
+      let existingPR = prs[targetIssue.number];
+      if (!existingPR && cwd) {
+        const found = await findTicketPR(cwd, targetIssue.number, branches[targetIssue.number], runGh);
+        if (found) {
+          existingPR = found;
+          setPrs((prev) => ({ ...prev, [targetIssue.number]: found }));
+        }
+      }
+      setDeliveryDialog(createInitialDeliveryState(targetIssue, existingPR));
+      return;
+    }
+
+    setNotice(`Starting work on #${targetIssue.number}…`);
+    const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
+    const result = await dispatchWork(targetIssue, sibling, client);
+    if (result.notImplemented) {
+      showError(result.message, "Not Implemented");
+    } else if (!result.ok) {
+      showError(result.message, "Error");
+    } else {
+      setNotice(result.message);
+    }
+  };
 
   useInput(async (input, key) => {
     if (key.ctrl && input === "c") {
@@ -240,6 +313,102 @@ export const App: React.FC<AppProps> = ({
         setErrorDialog(null);
         return;
       }
+      return;
+    }
+
+    if (deliveryDialog) {
+      if (deliveryDialog.alreadyDelivered || deliveryDialog.isFinished || deliveryDialog.error) {
+        if (
+          key.return ||
+          key.escape ||
+          input === " " ||
+          input === "q" ||
+          input === "Q"
+        ) {
+          setDeliveryDialog(null);
+          if (cwd) {
+            refreshBoardState(cwd, stateRef.current, runtime, fetchSibling, fetchBranches)
+              .then(({ loaded, sibling: newSibling, branches: newBranches }) => {
+                if (newSibling !== undefined) setSibling(newSibling);
+                if (newBranches) setBranches(newBranches);
+                if (loaded.ok) {
+                  const prevNumber = issuesRef.current[selectedRef.current]?.number;
+                  const currentSel = selectedRef.current;
+                  const nextArranged = selectableIssues(
+                    boardRows(loaded.issues, { branches: newBranches, prs: prsRef.current }),
+                  );
+                  const newSel = preserveSelection(nextArranged, currentSel, prevNumber);
+                  setRepo(loaded.repo);
+                  setIssues(nextArranged);
+                  setSelected(newSel);
+                }
+              })
+              .catch(() => {});
+          }
+          return;
+        }
+        return;
+      }
+
+      if (!deliveryDialog.isStarted) {
+        if (key.return || input === " ") {
+          const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
+          const targetSibling = sibling;
+          if (!targetSibling || targetSibling.status !== "idle") {
+            setDeliveryDialog((prev) =>
+              prev ? { ...prev, error: "Agent is no longer idle", isFinished: true } : null,
+            );
+            return;
+          }
+          if (!cwd) {
+            setDeliveryDialog((prev) =>
+              prev ? { ...prev, error: "No repository working directory found", isFinished: true } : null,
+            );
+            return;
+          }
+
+          setDeliveryDialog((prev) => (prev ? { ...prev, isStarted: true } : null));
+
+          runDeliveryWorkflow({
+            cwd,
+            issue: deliveryDialog.issue,
+            sibling: targetSibling,
+            client,
+            runGit,
+            runGh,
+            onUpdate: (nextState) => {
+              setDeliveryDialog(nextState);
+            },
+          })
+            .then((finalState) => {
+              if (finalState.pr) {
+                setPrs((prev) => ({
+                  ...prev,
+                  [finalState.issue.number]: finalState.pr!,
+                }));
+              }
+            })
+            .catch((err) => {
+              setDeliveryDialog((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      error: err instanceof Error ? err.message : String(err),
+                      isFinished: true,
+                    }
+                  : null,
+              );
+            });
+          return;
+        }
+        if (key.escape || input === "q" || input === "Q") {
+          setDeliveryDialog(null);
+          return;
+        }
+        return;
+      }
+
+      // If delivery workflow is running, ignore other keystrokes
       return;
     }
 
@@ -284,25 +453,7 @@ export const App: React.FC<AppProps> = ({
       }
       if (input === "w" || input === "W") {
         if (!detailIssue) return;
-        if (isIssueBlocked(detailIssue, issues)) {
-          showError(`Ticket #${detailIssue.number} is blocked.`, "Action Blocked");
-          return;
-        }
-        if (!sibling || sibling.status !== "idle") {
-          const statusText = sibling?.status ? ` (${sibling.status})` : " (unavailable)";
-          showError(`Agent is not idle${statusText}.`, "Agent Busy");
-          return;
-        }
-        setNotice(`Starting work on #${detailIssue.number}…`);
-        const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
-        const result = await dispatchWork(detailIssue, sibling, client);
-        if (result.notImplemented) {
-          showError(result.message, "Not Implemented");
-        } else if (!result.ok) {
-          showError(result.message, "Error");
-        } else {
-          setNotice(result.message);
-        }
+        await handleWorkPress(detailIssue);
         return;
       }
       return;
@@ -324,25 +475,7 @@ export const App: React.FC<AppProps> = ({
       if (input === "w" || input === "W") {
         const currentIssue = issues[selected];
         if (!currentIssue) return;
-        if (isIssueBlocked(currentIssue, issues)) {
-          showError(`Ticket #${currentIssue.number} is blocked.`, "Action Blocked");
-          return;
-        }
-        if (!sibling || sibling.status !== "idle") {
-          const statusText = sibling?.status ? ` (${sibling.status})` : " (unavailable)";
-          showError(`Agent is not idle${statusText}.`, "Agent Busy");
-          return;
-        }
-        setNotice(`Starting work on #${currentIssue.number}…`);
-        const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
-        const result = await dispatchWork(currentIssue, sibling, client);
-        if (result.notImplemented) {
-          showError(result.message, "Not Implemented");
-        } else if (!result.ok) {
-          showError(result.message, "Error");
-        } else {
-          setNotice(result.message);
-        }
+        await handleWorkPress(currentIssue);
         return;
       }
       if (input === "f" || input === "F") {
@@ -350,7 +483,7 @@ export const App: React.FC<AppProps> = ({
         const next = nextIssueState(state);
         const cached = getCachedIssues(cwd, next, runtime?.stateDir);
         if (cached) {
-          const nextArranged = selectableIssues(boardRows(cached.issues));
+          const nextArranged = selectableIssues(boardRows(cached.issues, { branches, prs }));
           setRepo(cached.repo);
           setState(next);
           setIssues(nextArranged);
@@ -358,15 +491,17 @@ export const App: React.FC<AppProps> = ({
           setScroll(0);
         }
         setNotice(`Loading ${next} issues…`);
-        const { loaded, sibling: newSibling } = await refreshBoardState(
+        const { loaded, sibling: newSibling, branches: newBranches } = await refreshBoardState(
           cwd,
           next,
           runtime,
           fetchSibling,
+          fetchBranches,
         );
         if (newSibling !== undefined) setSibling(newSibling);
+        if (newBranches) setBranches(newBranches);
         if (loaded.ok) {
-          const nextArranged = selectableIssues(boardRows(loaded.issues));
+          const nextArranged = selectableIssues(boardRows(loaded.issues, { branches: newBranches ?? branches, prs }));
           setRepo(loaded.repo);
           setState(loaded.state);
           setIssues(nextArranged);
@@ -387,17 +522,19 @@ export const App: React.FC<AppProps> = ({
         const previous = issues[selected]?.number;
         const currentSel = selected;
         setNotice("Refreshing…");
-        const { loaded, sibling: newSibling } = await refreshBoardState(
+        const { loaded, sibling: newSibling, branches: newBranches } = await refreshBoardState(
           cwd,
           state,
           runtime,
           fetchSibling,
+          fetchBranches,
         );
         if (newSibling !== undefined) setSibling(newSibling);
+        if (newBranches) setBranches(newBranches);
         if (loaded.ok) {
-          const nextArranged = selectableIssues(boardRows(loaded.issues));
+          const nextArranged = selectableIssues(boardRows(loaded.issues, { branches: newBranches ?? branches, prs }));
           const newSel = preserveSelection(nextArranged, currentSel, previous);
-          const laid = boardRows(nextArranged);
+          const laid = boardRows(nextArranged, { branches: newBranches ?? branches, prs });
           const line = lineOfSelection(laid, newSel);
           setRepo(loaded.repo);
           setIssues(nextArranged);
@@ -460,6 +597,8 @@ export const App: React.FC<AppProps> = ({
           scroll={scroll}
           notice={notice}
           sibling={sibling}
+          branches={branches}
+          prs={prs}
           columns={dimensions.columns}
           rows={dimensions.rows}
         />
@@ -470,6 +609,25 @@ export const App: React.FC<AppProps> = ({
           title={errorDialog.title}
           message={errorDialog.message}
           detail={errorDialog.detail}
+          columns={dimensions.columns}
+          rows={dimensions.rows}
+        />
+      ) : null}
+
+      {deliveryDialog ? (
+        <DeliveryDialog
+          issue={deliveryDialog.issue}
+          branchName={deliveryDialog.branchName}
+          isStarted={deliveryDialog.isStarted}
+          isFinished={deliveryDialog.isFinished}
+          alreadyDelivered={deliveryDialog.alreadyDelivered}
+          existingPR={deliveryDialog.existingPR}
+          steps={deliveryDialog.steps}
+          currentStepId={deliveryDialog.currentStepId}
+          modifiedFiles={deliveryDialog.modifiedFiles}
+          agentMessage={deliveryDialog.agentMessage}
+          pr={deliveryDialog.pr}
+          error={deliveryDialog.error}
           columns={dimensions.columns}
           rows={dimensions.rows}
         />

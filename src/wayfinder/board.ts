@@ -50,9 +50,14 @@ export function blockerNumbers(body: string | undefined): number[] {
   return numbers;
 }
 
-export function boardRows(issues: Issue[]): BoardRow[] {
+export interface BoardOptions {
+  branches?: Map<number, string> | Record<number, string>;
+  prs?: Map<number, { number: number; url: string; state?: string }> | Record<number, { number: number; url: string; state?: string }>;
+}
+
+export function boardRows(issues: Issue[], options?: BoardOptions): BoardRow[] {
   if (!usesMaps(issues)) {
-    return issues.map((issue) => issueRow(issue, 0, issues));
+    return issues.map((issue) => issueRow(issue, 0, issues, options));
   }
 
   const byNumber = new Map(issues.map((issue) => [issue.number, issue]));
@@ -79,10 +84,10 @@ export function boardRows(issues: Issue[]): BoardRow[] {
 
   for (const map of maps) {
     emitted.add(map.number);
-    rows.push(issueRow(map, 0, issues));
+    rows.push(issueRow(map, 0, issues, options));
     for (const child of sortChildren(children.get(map.number) ?? [])) {
       emitted.add(child.number);
-      rows.push(issueRow(child, 1, issues));
+      rows.push(issueRow(child, 1, issues, options));
     }
   }
 
@@ -94,21 +99,21 @@ export function boardRows(issues: Issue[]): BoardRow[] {
     const parentIssue = byNumber.get(parent);
     if (parentIssue && !emitted.has(parentIssue.number)) {
       emitted.add(parentIssue.number);
-      rows.push(issueRow(parentIssue, 0, issues));
+      rows.push(issueRow(parentIssue, 0, issues, options));
     } else if (!parentIssue) {
       rows.push({ type: "label", text: `Map #${parent}` });
     }
     for (const child of sortChildren(children.get(parent) ?? [])) {
       if (emitted.has(child.number)) continue;
       emitted.add(child.number);
-      rows.push(issueRow(child, 1, issues));
+      rows.push(issueRow(child, 1, issues, options));
     }
   }
 
   const rest = loose.filter((issue) => !emitted.has(issue.number)).sort((a, b) => b.number - a.number);
   if (rest.length > 0) {
     if (rows.length > 0) rows.push({ type: "label", text: "Other" });
-    for (const issue of rest) rows.push(issueRow(issue, 0, issues));
+    for (const issue of rest) rows.push(issueRow(issue, 0, issues, options));
   }
 
   return rows;
@@ -141,14 +146,37 @@ export function isIssueBlocked(issue: Issue, all: Issue[]): boolean {
   return blockerNumbers(issue.body).some((number) => openNumbers.has(number));
 }
 
-function issueRow(issue: Issue, depth: number, all: Issue[]): BoardRow {
-  const kind = ticketKind(issue.labels);
-  const blocked = isIssueBlocked(issue, all);
-  const badges = badgesFor(issue, kind, blocked);
-  return { type: "issue", issue, depth, kind, badges, tone: rowTone(issue, kind, blocked) };
+function getOptionBranch(options: BoardOptions | undefined, issueNumber: number): string | undefined {
+  if (!options?.branches) return undefined;
+  if (options.branches instanceof Map) return options.branches.get(issueNumber);
+  return options.branches[issueNumber];
 }
 
-function badgesFor(issue: Issue, kind: TicketKind, blocked: boolean): string[] {
+function getOptionPR(
+  options: BoardOptions | undefined,
+  issueNumber: number,
+): { number: number; url: string; state?: string } | undefined {
+  if (!options?.prs) return undefined;
+  if (options.prs instanceof Map) return options.prs.get(issueNumber);
+  return options.prs[issueNumber];
+}
+
+function issueRow(issue: Issue, depth: number, all: Issue[], options?: BoardOptions): BoardRow {
+  const kind = ticketKind(issue.labels);
+  const blocked = isIssueBlocked(issue, all);
+  const branch = getOptionBranch(options, issue.number);
+  const pr = getOptionPR(options, issue.number);
+  const badges = badgesFor(issue, kind, blocked, branch, pr);
+  return { type: "issue", issue, depth, kind, badges, tone: rowTone(issue, kind, blocked, pr) };
+}
+
+function badgesFor(
+  issue: Issue,
+  kind: TicketKind,
+  blocked: boolean,
+  branch?: string,
+  pr?: { number: number; url: string; state?: string },
+): string[] {
   const badges: string[] = [];
   if (kind === "other") {
     if (issue.labels.length > 0) badges.push(issue.labels.join(", "));
@@ -156,6 +184,12 @@ function badgesFor(issue: Issue, kind: TicketKind, blocked: boolean): string[] {
     badges.push(kind);
     const extras = issue.labels.filter((label) => !isKindLabel(label, kind));
     if (extras.length > 0) badges.push(extras.join(", "));
+  }
+  if (branch) {
+    badges.push(branch);
+  }
+  if (pr) {
+    badges.push(`PR #${pr.number}`);
   }
   if (issue.closed) badges.push("closed");
   if (blocked) badges.push("blocked");
@@ -168,7 +202,12 @@ function badgesFor(issue: Issue, kind: TicketKind, blocked: boolean): string[] {
 }
 
 /** One color per row. Blocked and claimed beat "available" states. */
-export function rowTone(issue: Issue, kind: TicketKind, blocked: boolean): RowTone {
+export function rowTone(
+  issue: Issue,
+  kind: TicketKind,
+  blocked: boolean,
+  _pr?: { number: number; url: string; state?: string },
+): RowTone {
   if (issue.closed) return "closed";
   if (blocked) return "blocked";
   if (issue.assignees.length > 0) return "progress";

@@ -14,6 +14,8 @@ export interface ListViewProps {
   scroll: number;
   notice?: string;
   sibling?: SiblingAgent;
+  branches?: Record<number, string>;
+  prs?: Record<number, { number: number; url: string; state?: string }>;
   columns: number;
   rows: number;
 }
@@ -60,11 +62,13 @@ export const ListView: React.FC<ListViewProps> = ({
   scroll,
   notice,
   sibling,
+  branches,
+  prs,
   columns,
   rows,
 }) => {
   const windowSize = Math.max(rows - 3, 1);
-  const laid = boardRows(issues);
+  const laid = boardRows(issues, { branches, prs });
   const selectable = selectableIssues(laid);
   const selectedLine = lineOfSelection(laid, selected);
   const currentScroll = reveal(selectedLine, scroll, windowSize);

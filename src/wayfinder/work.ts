@@ -73,11 +73,41 @@ export async function handleWorkTask(
 }
 
 export async function handleWorkDelivery(
-  _issue: Issue,
-  _sibling: SiblingAgent,
-  _client: (args: string[]) => Promise<HerdrCall>,
+  issue: Issue,
+  sibling: SiblingAgent,
+  client: (args: string[]) => Promise<HerdrCall>,
+  options?: {
+    cwd?: string;
+    runGit?: import("../git.ts").GitRunner;
+    runGh?: import("../github/issues.ts").GhRunner;
+    onUpdate?: (state: import("./delivery.ts").DeliveryState) => void;
+  },
 ): Promise<WorkResult> {
-  return { ok: false, notImplemented: true, message: "Work for delivery tickets is not implemented yet" };
+  const target = sibling.paneId ?? sibling.agent;
+  if (!target) {
+    return { ok: false, message: "No sibling agent target found" };
+  }
+
+  const { runDeliveryWorkflow } = await import("./delivery.ts");
+  const cwd = options?.cwd ?? sibling.cwd ?? process.cwd();
+  const res = await runDeliveryWorkflow({
+    cwd,
+    issue,
+    sibling,
+    client,
+    runGit: options?.runGit,
+    runGh: options?.runGh,
+    onUpdate: options?.onUpdate,
+  });
+
+  if (res.error) {
+    return { ok: false, message: res.error };
+  }
+
+  return {
+    ok: true,
+    message: res.pr ? `Delivery PR created: ${res.pr.url}` : `Started delivery work on #${issue.number}`,
+  };
 }
 
 export async function handleWorkOther(

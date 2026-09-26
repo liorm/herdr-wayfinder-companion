@@ -8,6 +8,7 @@ import {
   getCachedIssues,
   saveCachedIssues,
 } from "../github/cache.ts";
+import { listGitBranches, findAssociatedBranch } from "../git.ts";
 import { formatPlainIssues } from "./render.ts";
 import { readRuntime, type PluginRuntime } from "../runtime.ts";
 import { resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
@@ -21,6 +22,7 @@ export interface IssuePaneOptions {
   runtime?: PluginRuntime;
   refreshIntervalMs?: number;
   fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
+  fetchBranches?: (cwd: string) => Promise<string[]>;
 }
 
 export async function refreshBoardState(
@@ -28,15 +30,26 @@ export async function refreshBoardState(
   currentState: IssueState,
   runtime?: PluginRuntime,
   fetchSibling: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined> = resolveSiblingAgent,
+  fetchBranches: (cwd: string) => Promise<string[]> = listGitBranches,
 ) {
-  const [loaded, sibling] = await Promise.all([
+  const [loaded, sibling, gitBranches] = await Promise.all([
     loadIssues(cwd, currentState),
     runtime ? fetchSibling(runtime).catch(() => undefined) : Promise.resolve(undefined),
+    fetchBranches(cwd).catch(() => [] as string[]),
   ]);
   if (loaded.ok) {
     saveCachedIssues(cwd, currentState, loaded.repo, loaded.issues, runtime?.stateDir);
   }
-  return { loaded, sibling };
+  const branches: Record<number, string> = {};
+  if (loaded.ok) {
+    for (const issue of loaded.issues) {
+      const match = findAssociatedBranch(issue.number, issue.title, gitBranches);
+      if (match) {
+        branches[issue.number] = match;
+      }
+    }
+  }
+  return { loaded, sibling, branches };
 }
 
 export async function runIssuePane(

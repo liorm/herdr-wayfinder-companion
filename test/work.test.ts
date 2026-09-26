@@ -196,7 +196,7 @@ describe("dispatchWork", () => {
     expect(result.message).toContain("Agent is not idle");
   });
 
-  test("returns not implemented yet for grilling, research, prototype, task, delivery, and other kinds", async () => {
+  test("returns not implemented yet for grilling, research, prototype, task, and other kinds", async () => {
     const mockHerdr = async (): Promise<HerdrCall> => {
       return { ok: true, status: 0, stdout: "", stderr: "", json: null };
     };
@@ -217,17 +217,22 @@ describe("dispatchWork", () => {
     expect(taskRes.ok).toBe(false);
     expect(taskRes.message).toBe("Work for task tickets is not implemented yet");
 
-    const delivRes = await dispatchWork(deliveryIssue, idleSibling, mockHerdr);
-    expect(delivRes.ok).toBe(false);
-    expect(delivRes.message).toBe("Work for delivery tickets is not implemented yet");
-
     const otherRes = await dispatchWork(otherIssue, idleSibling, mockHerdr);
     expect(otherRes.ok).toBe(false);
     expect(otherRes.message).toBe("Work for other tickets is not implemented yet");
   });
 
   test("handles individual handler functions directly", async () => {
-    const mockHerdr = async (): Promise<HerdrCall> => {
+    const mockHerdr = async (args: string[]): Promise<HerdrCall> => {
+      if (args[0] === "agent" && args[1] === "get") {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: { result: { agent: { agent_status: "idle", title: "Done" } } },
+        };
+      }
       return { ok: true, status: 0, stdout: "", stderr: "", json: null };
     };
 
@@ -235,8 +240,21 @@ describe("dispatchWork", () => {
     expect((await handleWorkResearch(researchIssue, idleSibling, mockHerdr)).message).toContain("research");
     expect((await handleWorkPrototype(prototypeIssue, idleSibling, mockHerdr)).message).toContain("prototype");
     expect((await handleWorkTask(taskIssue, idleSibling, mockHerdr)).message).toContain("task");
-    expect((await handleWorkDelivery(deliveryIssue, idleSibling, mockHerdr)).message).toContain("delivery");
     expect((await handleWorkOther(otherIssue, idleSibling, mockHerdr)).message).toContain("other");
+
+    const mockGit = async () => ({ status: 0, stdout: "", stderr: "" });
+    const mockGh = async () => ({
+      status: 0,
+      stdout: JSON.stringify([{ number: 1, title: "PR", url: "https://pr.url", state: "OPEN" }]),
+      stderr: "",
+    });
+    const delivRes = await handleWorkDelivery(deliveryIssue, idleSibling, mockHerdr, {
+      cwd: "/fake/repo",
+      runGit: mockGit,
+      runGh: mockGh,
+    });
+    expect(delivRes.ok).toBe(true);
+    expect(delivRes.message).toContain("Delivery PR created: https://pr.url");
   });
 
   test("handles error response from herdr client during map prompt sequence", async () => {

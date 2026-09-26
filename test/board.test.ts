@@ -111,6 +111,22 @@ describe("boardRows", () => {
       { type: "issue", issue: bug, depth: 0, kind: "other", badges: ["bug"], tone: "plain" },
     ]);
   });
+
+  test("includes associated branch and PR badges when options are provided", () => {
+    const rows = boardRows([claimed, blocked], {
+      branches: { 171: "171-assign-strip-creator" },
+      prs: { 171: { number: 45, url: "https://github.com/org/repo/pull/45" } },
+    });
+    expect(rows[0]).toEqual({ type: "label", text: "Map #140" });
+    expect(rows[2]).toEqual({
+      type: "issue",
+      issue: blocked,
+      depth: 1,
+      kind: "delivery",
+      badges: ["delivery", "171-assign-strip-creator", "PR #45", "blocked"],
+      tone: "blocked",
+    });
+  });
 });
 
 describe("render", () => {
