@@ -1,10 +1,9 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { Issue } from "../../github/issues.ts";
 import { clip } from "../render.ts";
+import { TICKET_FOOTER } from "../ticket.ts";
 
 export interface DetailViewProps {
-  issue: Issue;
   lines: string[];
   scroll: number;
   columns: number;
@@ -12,34 +11,30 @@ export interface DetailViewProps {
 }
 
 export const DetailView: React.FC<DetailViewProps> = ({
-  issue,
   lines,
   scroll,
   columns,
   rows,
 }) => {
-  const windowSize = Math.max(rows - 3, 1);
+  const showFooter = rows > 1;
+  const windowSize = showFooter ? rows - 1 : Math.max(rows, 1);
   const visibleLines = lines.slice(scroll, scroll + windowSize);
-
-  while (visibleLines.length < windowSize) {
-    visibleLines.push("");
-  }
+  while (visibleLines.length < windowSize) visibleLines.push("");
 
   return (
-    <Box flexDirection="column" width={columns} height={rows}>
-      <Box width={columns}>
-        <Text bold>{clip(`#${issue.number}  ${issue.title}`, columns)}</Text>
-      </Box>
-      <Box width={columns}>
-        <Text dimColor>{clip("j/k scroll   esc back   q close", columns)}</Text>
-      </Box>
-      <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" width={columns} height={Math.max(rows, 1)}>
+      <Box flexDirection="column" width={columns} height={windowSize}>
         {visibleLines.map((line, index) => (
-          <Box key={`detail-line-${scroll + index}`} width={columns}>
-            <Text wrap="truncate">{line}</Text>
+          <Box key={`detail-line-${scroll + index}`} width={columns} height={1}>
+            <Text wrap="truncate">{line.length > 0 ? line : " "}</Text>
           </Box>
         ))}
       </Box>
+      {showFooter ? (
+        <Box width={columns} height={1}>
+          <Text dimColor>{clip(TICKET_FOOTER, columns)}</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 };

@@ -9,8 +9,28 @@ if [ "$args" = "issue list --state open --limit 200 --json number,title,labels,a
   printf '%s\n' '[{"number":7,"title":"Fix the gate","labels":[{"name":"bug"}],"assignees":[],"author":{"login":"ada"},"url":"https://example.com/7"}]'
   exit 0
 fi
-if [ "$args" = "issue view 7" ] || [ "$args" = "issue view 7 --comments" ]; then
-  printf '%s\n' 'title: Fix the gate'
+if [ "$args" = "issue view 7" ]; then
+  printf '%s\n' 'title:	Fix the gate'
+  printf '%s\n' 'state:	OPEN'
+  printf '%s\n' 'author:	ada'
+  printf '%s\n' 'labels:	bug'
+  printf '%s\n' 'comments:	1'
+  printf '%s\n' 'assignees:	'
+  printf '%s\n' 'projects:	'
+  printf '%s\n' 'milestone:	'
+  printf '%s\n' 'number:	7'
+  printf '%s\n' '--'
+  printf '%s\n' 'The gate is stuck.'
+  exit 0
+fi
+if [ "$args" = "issue view 7 --comments" ]; then
+  printf '%s\n' 'author:	ada'
+  printf '%s\n' 'association:	none'
+  printf '%s\n' 'edited:	false'
+  printf '%s\n' 'status:	none'
+  printf '%s\n' '--'
+  printf '%s\n' 'Ship it.'
+  printf '%s\n' '--'
   exit 0
 fi
 echo "unexpected gh args: $args" >&2

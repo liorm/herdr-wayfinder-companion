@@ -11,7 +11,7 @@ import type { PluginRuntime } from "../runtime.ts";
 import { resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
 import { boardRows, lineOfSelection, selectableIssues } from "../wayfinder/board.ts";
 import { preserveSelection, reveal } from "./render.ts";
-import { formatMarkdown } from "./markdown.ts";
+import { formatTicketView } from "./ticket.ts";
 import { ListView } from "./components/ListView.tsx";
 import { DetailView } from "./components/DetailView.tsx";
 import { MessageView } from "./components/MessageView.tsx";
@@ -84,6 +84,7 @@ export const App: React.FC<AppProps> = ({
   // Detail view state
   const [detailIssue, setDetailIssue] = useState<Issue | null>(null);
   const [detailRawBody, setDetailRawBody] = useState<string>("");
+  const [detailComments, setDetailComments] = useState<string>("");
   const [detailLines, setDetailLines] = useState<string[]>([]);
   const [detailScroll, setDetailScroll] = useState<number>(0);
 
@@ -111,12 +112,17 @@ export const App: React.FC<AppProps> = ({
   selectedRef.current = selected;
   const refreshingRef = useRef(false);
 
-  // Re-wrap markdown when columns change in detail view
+  const listWindow = Math.max(dimensions.rows - 3, 1);
+  const detailWindow = Math.max(dimensions.rows - 1, 1);
+
+  // Re-wrap the ticket when the pane width changes. The header scrolls with the body.
   useEffect(() => {
     if (mode === "detail" && detailIssue) {
-      setDetailLines(formatMarkdown(detailRawBody, dimensions.columns));
+      const next = formatTicketView(detailIssue, detailRawBody, detailComments, dimensions.columns, issues);
+      setDetailLines(next);
+      setDetailScroll((prev) => Math.min(prev, Math.max(0, next.length - detailWindow)));
     }
-  }, [dimensions.columns, mode, detailIssue, detailRawBody]);
+  }, [dimensions.columns, mode, detailIssue, detailRawBody, detailComments, issues, detailWindow]);
 
   // Immediate initial background refresh if requested (e.g. fast startup from cache)
   useEffect(() => {
@@ -189,8 +195,6 @@ export const App: React.FC<AppProps> = ({
     return () => clearInterval(interval);
   }, [cwd, refreshIntervalMs, runtime, fetchSibling]);
 
-  const windowSize = Math.max(dimensions.rows - 3, 1);
-
   const moveSelection = useCallback(
     (delta: number) => {
       if (issues.length === 0) return;
@@ -198,10 +202,10 @@ export const App: React.FC<AppProps> = ({
       const laid = boardRows(issues);
       const line = lineOfSelection(laid, nextSelected);
       setSelected(nextSelected);
-      setScroll(reveal(line, scroll, windowSize));
+      setScroll(reveal(line, scroll, listWindow));
       setNotice(undefined);
     },
-    [issues, selected, scroll, windowSize],
+    [issues, selected, scroll, listWindow],
   );
 
   useInput(async (input, key) => {
@@ -232,20 +236,20 @@ export const App: React.FC<AppProps> = ({
       }
       if (key.downArrow || input === "j") {
         setDetailScroll((prev) => {
-          const max = Math.max(0, detailLines.length - windowSize);
+          const max = Math.max(0, detailLines.length - detailWindow);
           return Math.min(max, prev + 1);
         });
         return;
       }
       if (key.pageDown || input === " ") {
         setDetailScroll((prev) => {
-          const max = Math.max(0, detailLines.length - windowSize);
-          return Math.min(max, prev + windowSize);
+          const max = Math.max(0, detailLines.length - detailWindow);
+          return Math.min(max, prev + detailWindow);
         });
         return;
       }
       if (key.pageUp || input === "b") {
-        setDetailScroll((prev) => Math.max(0, prev - windowSize));
+        setDetailScroll((prev) => Math.max(0, prev - detailWindow));
         return;
       }
       return;
@@ -321,7 +325,7 @@ export const App: React.FC<AppProps> = ({
           setRepo(loaded.repo);
           setIssues(nextArranged);
           setSelected(newSel);
-          setScroll(reveal(line, scroll, windowSize));
+          setScroll(reveal(line, scroll, listWindow));
           setNotice(undefined);
         } else {
           setNotice(loaded.message);
@@ -334,15 +338,14 @@ export const App: React.FC<AppProps> = ({
         if (!currentIssue) return;
         setNotice(`Loading #${currentIssue.number}…`);
         const viewed = await loadIssueView(cwd, currentIssue.number);
-        let body = viewed.ok ? viewed.body : "";
-        if (!body.trim() && currentIssue.body) {
-          body = currentIssue.body;
-        }
-        if (viewed.ok || body.length > 0) {
-          const formatted = formatMarkdown(body, dimensions.columns);
+        const body = viewed.ok ? viewed.body : "";
+        const comments = viewed.ok ? viewed.comments : "";
+        const fallback = !viewed.ok && currentIssue.body ? currentIssue.body : body;
+        if (viewed.ok || fallback.length > 0) {
           setDetailIssue(currentIssue);
-          setDetailRawBody(body);
-          setDetailLines(formatted);
+          setDetailRawBody(fallback);
+          setDetailComments(comments);
+          setDetailLines(formatTicketView(currentIssue, fallback, comments, dimensions.columns, issues));
           setDetailScroll(0);
           setNotice(undefined);
           setMode("detail");
@@ -369,7 +372,6 @@ export const App: React.FC<AppProps> = ({
   if (mode === "detail" && detailIssue) {
     return (
       <DetailView
-        issue={detailIssue}
         lines={detailLines}
         scroll={detailScroll}
         columns={dimensions.columns}

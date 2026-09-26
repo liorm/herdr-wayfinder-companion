@@ -1,7 +1,7 @@
 import { ISSUE_LIMIT, type Issue, type IssueState } from "../github/issues.ts";
 import { boardRows, lineOfSelection, selectableIssues, type BoardRow, type RowTone } from "../wayfinder/board.ts";
 import type { SiblingAgent } from "../sibling.ts";
-import { formatMarkdown } from "./markdown.ts";
+import { formatTicketView, TICKET_FOOTER } from "./ticket.ts";
 
 export interface ListModel {
   kind: "list";
@@ -18,6 +18,8 @@ export interface DetailModel {
   kind: "detail";
   issue: Issue;
   body: string;
+  /** Raw `gh issue view --comments` text. Omitted when the view has no comments. */
+  comments?: string;
   scroll: number;
   list: ListModel;
 }
@@ -152,17 +154,16 @@ function listLines(model: ListModel, columns: number, rows: number): string[] {
 }
 
 function detailLines(model: DetailModel, columns: number, rows: number): string[] {
-  const windowSize = Math.max(rows - 3, 1);
   const text = model.body.trim().length > 0 ? model.body : (model.issue.body?.trim() ?? "");
-  const body = formatMarkdown(text, columns);
+  const body = formatTicketView(model.issue, text, model.comments ?? "", columns, model.list.issues);
+  if (rows <= 1) return [pad(clip(TICKET_FOOTER, columns), columns)];
+  const windowSize = rows - 1;
   const scroll = moveScroll(model.scroll, 0, body.length, windowSize);
-  const lines = [
-    pad(clip(`#${model.issue.number}  ${model.issue.title}`, columns), columns),
-    pad(clip("j/k scroll   esc back   q close", columns), columns),
-  ];
+  const lines: string[] = [];
   for (let index = 0; index < windowSize; index++) {
-    lines.push(pad(clip(body[scroll + index] ?? "", columns), columns));
+    lines.push(padAnsi(clipAnsi(body[scroll + index] ?? "", columns), columns));
   }
+  lines.push(pad(clip(TICKET_FOOTER, columns), columns));
   return lines.slice(0, rows);
 }
 
@@ -193,8 +194,42 @@ export function clip(text: string, width: number): string {
   return `${chars.slice(0, width - 1).join("")}…`;
 }
 
+const ANSI = /\x1b\[[0-9;]*m/g;
+
+export function visibleWidth(text: string): number {
+  return [...text.replace(ANSI, "")].length;
+}
+
+/** Clip by visible cells so ANSI color codes are not counted as width. */
+export function clipAnsi(text: string, width: number): string {
+  if (width <= 0) return "";
+  if (visibleWidth(text) <= width) return text;
+  let visible = 0;
+  let out = "";
+  const pattern = /\x1b\[[0-9;]*m/g;
+  let cursor = 0;
+  for (const match of text.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    const plain = [...text.slice(cursor, index)];
+    if (visible + plain.length >= width) {
+      out += plain.slice(0, width - visible).join("");
+      return `${out}\x1b[0m`;
+    }
+    out += text.slice(cursor, index) + match[0];
+    visible += plain.length;
+    cursor = index + match[0].length;
+  }
+  out += [...text.slice(cursor)].slice(0, width - visible).join("");
+  return `${out}\x1b[0m`;
+}
+
 function pad(text: string, width: number): string {
   const extra = width - [...text].length;
+  return extra > 0 ? text + " ".repeat(extra) : text;
+}
+
+function padAnsi(text: string, width: number): string {
+  const extra = width - visibleWidth(text);
   return extra > 0 ? text + " ".repeat(extra) : text;
 }
 

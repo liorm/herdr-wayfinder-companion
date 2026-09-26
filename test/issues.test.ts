@@ -89,7 +89,8 @@ describe("loadIssueView", () => {
     const viewed = await loadIssueView("/work/widgets", 7, run);
     expect(viewed).toEqual({
       ok: true,
-      body: "title:\tFix the gate\n--\nFix the gate body\n\ncomment 1: approved",
+      body: "title:\tFix the gate\n--\nFix the gate body",
+      comments: "comment 1: approved",
     });
   });
 
@@ -105,6 +106,7 @@ describe("loadIssueView", () => {
     expect(viewed).toEqual({
       ok: true,
       body: "title:\tFix the gate\n--\nHere is the issue description",
+      comments: "",
     });
   });
 });

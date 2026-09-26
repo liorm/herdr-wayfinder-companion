@@ -44,7 +44,9 @@ The list colors that work state. In progress is green, blocked is red, frontier 
 | --- | --- |
 | `j` / `k` | Move through the list, or scroll an open issue |
 | enter | Show the issue and its comments |
-| esc | Return to the list |
+| esc | Return to the list from an open ticket |
+
+An open ticket scrolls in every row above its footer, `j/k scroll   esc back`. Esc closes the ticket and returns to the list.
 | `f` | Cycle open, closed, and all issues |
 | `r` | Refresh |
 | `q` | Close the pane |

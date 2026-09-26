@@ -70,6 +70,8 @@ describe("renderPane", () => {
     );
     expect(frame).toContain("This is the fallback body from issue list.");
     expect(frame).not.toContain("This issue has no body.");
+    expect(frame).toContain("esc back");
+    expect(frame).not.toContain("q close");
   });
 
   test("detail view renders markdown and word-wraps long content", () => {
@@ -94,8 +96,61 @@ describe("renderPane", () => {
     );
     expect(frame).toContain("Bug Summary");
     expect(frame).toContain("rather long");
+    expect(plainRows(frame)[0]).toContain("#7");
+    expect(plainRows(frame)[1]).toContain("Fix the gate");
+    expect(plainRows(frame).at(-1)).toContain("esc back");
+    expect(frame).not.toContain("q close");
+  });
+
+  test("detail scroll fills every row above the footer", () => {
+    const list: ListModel = {
+      kind: "list",
+      repo: "acme/widgets",
+      state: "open",
+      issues: [issue],
+      selected: 0,
+      scroll: 0,
+    };
+    const body = Array.from({ length: 40 }, (_, index) => `paragraph ${index} ${"word ".repeat(12)}`).join("\n\n");
+    const frame = renderPane(
+      {
+        kind: "detail",
+        issue,
+        body,
+        scroll: 0,
+        list,
+      },
+      40,
+      12,
+    );
+    const rows = plainRows(frame);
+    expect(rows).toHaveLength(12);
+    expect(rows.at(-1)).toContain("esc back");
+    expect(rows[0]).toContain("#7");
+    expect(rows.some((row) => row.includes("paragraph 0"))).toBe(true);
+    // Blank markdown rows still occupy a terminal row, so the window stays full height.
+    expect(rows.slice(0, -1).some((row) => row.trim() === "" && row.length === 40)).toBe(true);
+    const scrolled = renderPane(
+      {
+        kind: "detail",
+        issue,
+        body,
+        scroll: 1000,
+        list,
+      },
+      40,
+      12,
+    );
+    expect(plainRows(scrolled).slice(0, -1).join("\n")).toContain("paragraph 39");
   });
 });
+
+function plainRows(frame: string): string[] {
+  return frame
+    .split(/\x1b\[\d+;1H/)
+    .slice(1)
+    .map((row) => row.replace(/\x1b\[[0-9;]*m/g, ""));
+}
 
 describe("formatPlainIssues", () => {
   test("prints one issue per line", () => {

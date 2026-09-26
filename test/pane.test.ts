@@ -49,7 +49,7 @@ while time.time() < deadline:
         sent_enter = True
         mark = len(data)
         os.write(fd, b"\\r")
-    elif sent_enter and (not sent_escape) and b"title:" in data[mark:]:
+    elif sent_enter and (not sent_escape) and b"esc back" in data[mark:]:
         sent_escape = True
         mark = len(data)
         os.write(fd, b"\\x1b")
