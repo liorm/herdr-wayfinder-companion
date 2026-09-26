@@ -56,6 +56,9 @@ export interface WorkOptions extends ModelResolutionOptions {
   runGit?: import("../git.ts").GitRunner;
   runGh?: import("../github/issues.ts").GhRunner;
   onUpdate?: (state: import("./delivery.ts").DeliveryState) => void;
+  pollIntervalMs?: number;
+  startupGraceMs?: number;
+  maxWaitMs?: number;
 }
 
 export async function handleWorkGrilling(
@@ -119,6 +122,9 @@ export async function handleWorkDelivery(
     runGit: options?.runGit,
     runGh: options?.runGh,
     onUpdate: options?.onUpdate,
+    pollIntervalMs: options?.pollIntervalMs,
+    startupGraceMs: options?.startupGraceMs,
+    maxWaitMs: options?.maxWaitMs,
   });
 
   if (res.error) {

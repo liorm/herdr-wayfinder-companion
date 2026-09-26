@@ -292,6 +292,7 @@ describe("dispatchWork", () => {
       cwd: "/fake/repo",
       runGit: mockGit,
       runGh: mockGh,
+      pollIntervalMs: 10,
     });
     expect(delivRes.ok).toBe(true);
     expect(delivRes.message).toContain("Delivery PR created: https://pr.url");

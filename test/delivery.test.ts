@@ -270,4 +270,122 @@ describe("runDeliveryWorkflow", () => {
     expect(state.error).toContain("Working directory has uncommitted changes");
     expect(state.steps[0]?.status).toBe("failed");
   });
+
+  test("waits for implement prompt to complete and agent to become idle before sending commit-push-pr", async () => {
+    const executedHerdr: { time: number; args: string[] }[] = [];
+    let currentPhase: "init" | "clear" | "model" | "implement" | "pr" = "init";
+    let implementPollCount = 0;
+    let prSentTime: number | null = null;
+    let implementDoneTime: number | null = null;
+
+    const mockHerdr = async (args: string[]): Promise<HerdrCall> => {
+      executedHerdr.push({ time: Date.now(), args });
+
+      if (args[0] === "agent" && args[1] === "prompt") {
+        const prompt = args[3];
+        if (prompt === "/clear") currentPhase = "clear";
+        else if (prompt?.startsWith("/model")) currentPhase = "model";
+        else if (prompt?.startsWith("/implement")) currentPhase = "implement";
+        else if (prompt?.startsWith("/commit-push-pr")) {
+          currentPhase = "pr";
+          prSentTime = Date.now();
+        }
+        return { ok: true, status: 0, stdout: "", stderr: "", json: null };
+      }
+
+      if (args[0] === "agent" && args[1] === "get") {
+        if (currentPhase === "implement") {
+          implementPollCount++;
+          // Simulate 3 ticks of "working" before returning to "idle"
+          if (implementPollCount < 3) {
+            return {
+              ok: true,
+              status: 0,
+              stdout: "",
+              stderr: "",
+              json: { result: { agent: { agent_status: "working", title: "Implementing feature..." } } },
+            };
+          } else {
+            implementDoneTime = Date.now();
+            return {
+              ok: true,
+              status: 0,
+              stdout: "",
+              stderr: "",
+              json: { result: { agent: { agent_status: "idle", title: "Ready" } } },
+            };
+          }
+        }
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: { result: { agent: { agent_status: "idle", title: "Ready" } } },
+        };
+      }
+
+      return { ok: true, status: 0, stdout: "", stderr: "", json: null };
+    };
+
+    const mockGit: GitRunner = async () => ({ status: 0, stdout: "", stderr: "" });
+    const mockGh: GhRunner = async () => ({
+      status: 0,
+      stdout: JSON.stringify([{ number: 200, title: "PR", url: "https://github.com/example/repo/pull/200", state: "OPEN" }]),
+      stderr: "",
+    });
+
+    const finalState = await runDeliveryWorkflow({
+      cwd: "/fake/repo",
+      issue: sampleDeliveryIssue,
+      sibling: idleSibling,
+      client: mockHerdr,
+      runGit: mockGit,
+      runGh: mockGh,
+      pollIntervalMs: 10,
+      startupGraceMs: 20,
+    });
+
+    expect(finalState.isFinished).toBe(true);
+    expect(implementPollCount).toBeGreaterThanOrEqual(3);
+    expect(implementDoneTime).not.toBeNull();
+    expect(prSentTime).not.toBeNull();
+    // Verify commit-push-pr was sent strictly after implement was done
+    expect(prSentTime!).toBeGreaterThanOrEqual(implementDoneTime!);
+  });
+
+  test("handles agent blocked during implementation", async () => {
+    const mockHerdr = async (args: string[]): Promise<HerdrCall> => {
+      if (args[0] === "agent" && args[1] === "prompt" && args[3]?.startsWith("/implement")) {
+        return { ok: true, status: 0, stdout: "", stderr: "", json: null };
+      }
+      if (args[0] === "agent" && args[1] === "get") {
+        if (args[2] === "w1:pA") {
+          return {
+            ok: true,
+            status: 0,
+            stdout: "",
+            stderr: "",
+            json: { result: { agent: { agent_status: "blocked", title: "Waiting for human input" } } },
+          };
+        }
+      }
+      return { ok: true, status: 0, stdout: "", stderr: "", json: null };
+    };
+
+    const mockGit: GitRunner = async () => ({ status: 0, stdout: "", stderr: "" });
+
+    const state = await runDeliveryWorkflow({
+      cwd: "/fake/repo",
+      issue: sampleDeliveryIssue,
+      sibling: idleSibling,
+      client: mockHerdr,
+      runGit: mockGit,
+      pollIntervalMs: 10,
+    });
+
+    expect(state.isFinished).toBe(true);
+    expect(state.error).toContain("Agent is blocked");
+    expect(state.steps[1]?.status).toBe("failed");
+  });
 });

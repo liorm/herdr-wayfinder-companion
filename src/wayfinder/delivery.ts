@@ -107,17 +107,19 @@ export interface DeliveryWorkflowOptions extends ModelResolutionOptions {
   onUpdate?: (state: DeliveryState) => void;
   pollIntervalMs?: number;
   maxWaitMs?: number;
+  startupGraceMs?: number;
 }
 
-export async function checkAgentSettled(
+export async function waitForAgentIdle(
   target: string,
   client: (args: string[]) => Promise<HerdrCall>,
   maxWaitMs = 15000,
   pollIntervalMs = 500,
-  onPoll?: (status: string | undefined, message: string | undefined) => void,
-): Promise<{ ok: boolean; status?: string; message?: string }> {
+  onPoll?: (status: string | undefined, message: string | undefined) => void | Promise<void>,
+): Promise<{ ok: boolean; status?: string; message?: string; error?: string }> {
   const start = Date.now();
-  let seenWorking = false;
+  let lastStatus: string | undefined;
+  let lastMessage: string | undefined;
 
   while (Date.now() - start < maxWaitMs) {
     const res = await client(["agent", "get", target]);
@@ -125,22 +127,103 @@ export async function checkAgentSettled(
       const agentInfo = (res.json as { result?: { agent?: { agent_status?: string; title?: string } } }).result?.agent;
       const status = agentInfo?.agent_status;
       const message = agentInfo?.title;
+      lastStatus = status;
+      lastMessage = message;
+
       if (onPoll) {
-        onPoll(status, message);
+        await onPoll(status, message);
+      }
+
+      if (status === "idle" || status === "done") {
+        return { ok: true, status, message };
+      }
+
+      if (status === "blocked") {
+        return {
+          ok: false,
+          status,
+          message,
+          error: `Agent is blocked${message ? `: ${message}` : ""}`,
+        };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  return {
+    ok: false,
+    status: lastStatus ?? "unknown",
+    message: lastMessage,
+    error: `Agent is busy (${lastStatus ?? "unknown"})`,
+  };
+}
+
+export async function checkAgentSettled(
+  target: string,
+  client: (args: string[]) => Promise<HerdrCall>,
+  maxWaitMs = 15000,
+  pollIntervalMs = 500,
+  onPoll?: (status: string | undefined, message: string | undefined) => void | Promise<void>,
+  startupGraceMs?: number,
+): Promise<{ ok: boolean; status?: string; message?: string; error?: string }> {
+  const start = Date.now();
+  let seenWorking = false;
+  let lastStatus: string | undefined;
+  let lastMessage: string | undefined;
+  const effectiveGraceMs =
+    startupGraceMs ?? Math.min(1500, Math.max(pollIntervalMs * 2, 20));
+
+  while (Date.now() - start < maxWaitMs) {
+    const res = await client(["agent", "get", target]);
+    if (res.ok && res.json && typeof res.json === "object") {
+      const agentInfo = (res.json as { result?: { agent?: { agent_status?: string; title?: string } } }).result?.agent;
+      const status = agentInfo?.agent_status;
+      const message = agentInfo?.title;
+      lastStatus = status;
+      lastMessage = message;
+
+      if (onPoll) {
+        await onPoll(status, message);
+      }
+
+      if (status === "blocked") {
+        return {
+          ok: false,
+          status,
+          message,
+          error: `Agent is blocked${message ? `: ${message}` : ""}`,
+        };
       }
 
       if (status === "working") {
         seenWorking = true;
       }
 
-      if (status === "idle" || status === "done") {
-        return { ok: true, status, message };
+      if (seenWorking) {
+        if (status === "idle" || status === "done") {
+          return { ok: true, status, message };
+        }
+      } else {
+        if (Date.now() - start >= effectiveGraceMs) {
+          if (status === "idle" || status === "done") {
+            return { ok: true, status, message };
+          }
+        }
       }
     }
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 
-  return { ok: seenWorking, status: "idle" };
+  if (lastStatus === "idle" || lastStatus === "done") {
+    return { ok: true, status: lastStatus, message: lastMessage };
+  }
+
+  return {
+    ok: false,
+    status: lastStatus ?? "unknown",
+    message: lastMessage,
+    error: `Timed out waiting for agent (status: ${lastStatus ?? "unknown"})`,
+  };
 }
 
 export async function runDeliveryWorkflow(
@@ -155,6 +238,7 @@ export async function runDeliveryWorkflow(
     runGh = defaultGh,
     onUpdate,
     pollIntervalMs = 500,
+    startupGraceMs,
   } = options;
 
   const target = sibling.paneId ?? sibling.agent;
@@ -207,6 +291,14 @@ export async function runDeliveryWorkflow(
 
   // --- Step 2: Clear agent session ---
   setStepStatus("clear", "running");
+  const idleBeforeClear = await waitForAgentIdle(target, client, 15000, pollIntervalMs);
+  if (!idleBeforeClear.ok) {
+    const errorMsg = `Agent is not idle before clear: ${idleBeforeClear.error ?? "busy"}`;
+    setStepStatus("clear", "failed", errorMsg);
+    update({ error: errorMsg, isFinished: true });
+    return state;
+  }
+
   const clearCall = await client(["agent", "prompt", target, "/clear"]);
   if (!clearCall.ok) {
     const errorMsg = `Failed to clear session: ${herdrErrorMessage(clearCall)}`;
@@ -214,11 +306,25 @@ export async function runDeliveryWorkflow(
     update({ error: errorMsg, isFinished: true });
     return state;
   }
-  await checkAgentSettled(target, client, 5000, 300);
+  const clearWait = await checkAgentSettled(target, client, 15000, pollIntervalMs, undefined, startupGraceMs);
+  if (!clearWait.ok) {
+    const errorMsg = clearWait.error ?? "Failed waiting for session clear to complete";
+    setStepStatus("clear", "failed", errorMsg);
+    update({ error: errorMsg, isFinished: true });
+    return state;
+  }
   setStepStatus("clear", "completed");
 
   // --- Step 3: Set agent model to low effort ---
   setStepStatus("model", "running");
+  const idleBeforeModel = await waitForAgentIdle(target, client, 15000, pollIntervalMs);
+  if (!idleBeforeModel.ok) {
+    const errorMsg = `Agent is not idle before setting model: ${idleBeforeModel.error ?? "busy"}`;
+    setStepStatus("model", "failed", errorMsg);
+    update({ error: errorMsg, isFinished: true });
+    return state;
+  }
+
   const model =
     options.model ??
     getModelForTicketKind("delivery", { ...options, agent: options.agent ?? options.sibling.agent });
@@ -229,11 +335,25 @@ export async function runDeliveryWorkflow(
     update({ error: errorMsg, isFinished: true });
     return state;
   }
-  await checkAgentSettled(target, client, 5000, 300);
+  const modelWait = await checkAgentSettled(target, client, 15000, pollIntervalMs, undefined, startupGraceMs);
+  if (!modelWait.ok) {
+    const errorMsg = modelWait.error ?? "Failed waiting for model change to complete";
+    setStepStatus("model", "failed", errorMsg);
+    update({ error: errorMsg, isFinished: true });
+    return state;
+  }
   setStepStatus("model", "completed");
 
   // --- Step 4: Implement ticket ---
   setStepStatus("implement", "running");
+  const idleBeforeImplement = await waitForAgentIdle(target, client, 15000, pollIntervalMs);
+  if (!idleBeforeImplement.ok) {
+    const errorMsg = `Agent is not idle before implementation: ${idleBeforeImplement.error ?? "busy"}`;
+    setStepStatus("implement", "failed", errorMsg);
+    update({ error: errorMsg, isFinished: true });
+    return state;
+  }
+
   const implementPrompt = `/implement ${issue.number}, ask no questions`;
   const implementCall = await client(["agent", "prompt", target, implementPrompt]);
   if (!implementCall.ok) {
@@ -243,32 +363,25 @@ export async function runDeliveryWorkflow(
     return state;
   }
 
-  // Poll for implementation progress
-  let implementFinished = false;
-  const startImplementTime = Date.now();
-  const maxImplementTimeMs = 300_000; // 5 min timeout
+  // Poll for implementation progress until agent completes and settles to idle
+  const maxImplementTimeMs = options.maxWaitMs ?? 600_000;
+  const implementWait = await checkAgentSettled(
+    target,
+    client,
+    maxImplementTimeMs,
+    pollIntervalMs,
+    async (_status, message) => {
+      const files = await getModifiedFiles(cwd, runGit);
+      update({ modifiedFiles: files, agentMessage: message });
+    },
+    startupGraceMs,
+  );
 
-  while (!implementFinished && Date.now() - startImplementTime < maxImplementTimeMs) {
-    // 1. Check modified files
-    const files = await getModifiedFiles(cwd, runGit);
-    update({ modifiedFiles: files });
-
-    // 2. Check agent status
-    const agentCall = await client(["agent", "get", target]);
-    if (agentCall.ok && agentCall.json && typeof agentCall.json === "object") {
-      const agentObj = (agentCall.json as { result?: { agent?: { agent_status?: string; title?: string } } }).result?.agent;
-      const status = agentObj?.agent_status;
-      const message = agentObj?.title;
-      update({ agentMessage: message });
-
-      if (status === "idle" || status === "done") {
-        // Double-check if agent stayed idle
-        implementFinished = true;
-        break;
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  if (!implementWait.ok) {
+    const errorMsg = implementWait.error ?? "Failed waiting for implementation to complete";
+    setStepStatus("implement", "failed", errorMsg);
+    update({ error: errorMsg, isFinished: true });
+    return state;
   }
 
   // Final modified files fetch
@@ -276,8 +389,16 @@ export async function runDeliveryWorkflow(
   update({ modifiedFiles: finalFiles });
   setStepStatus("implement", "completed");
 
-  // --- Step 5: Create PR ---
+  // --- Step 5: Create PR (only after implement is done and agent is idle) ---
   setStepStatus("pr", "running");
+  const idleBeforePR = await waitForAgentIdle(target, client, 15000, pollIntervalMs);
+  if (!idleBeforePR.ok) {
+    const errorMsg = `Agent is not idle before PR creation: ${idleBeforePR.error ?? "busy"}`;
+    setStepStatus("pr", "failed", errorMsg);
+    update({ error: errorMsg, isFinished: true });
+    return state;
+  }
+
   const prPrompt = `/commit-push-pr ticket ${issue.number}`;
   const prCall = await client(["agent", "prompt", target, prPrompt]);
   if (!prCall.ok) {
@@ -288,25 +409,23 @@ export async function runDeliveryWorkflow(
   }
 
   // Poll for PR completion
-  let prFinished = false;
-  const startPrTime = Date.now();
-  const maxPrTimeMs = 180_000; // 3 min timeout
-
-  while (!prFinished && Date.now() - startPrTime < maxPrTimeMs) {
-    const agentCall = await client(["agent", "get", target]);
-    if (agentCall.ok && agentCall.json && typeof agentCall.json === "object") {
-      const agentObj = (agentCall.json as { result?: { agent?: { agent_status?: string; title?: string } } }).result?.agent;
-      const status = agentObj?.agent_status;
-      const message = agentObj?.title;
+  const maxPrTimeMs = 300_000;
+  const prWait = await checkAgentSettled(
+    target,
+    client,
+    maxPrTimeMs,
+    pollIntervalMs,
+    (_status, message) => {
       update({ agentMessage: message });
+    },
+    startupGraceMs,
+  );
 
-      if (status === "idle" || status === "done") {
-        prFinished = true;
-        break;
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  if (!prWait.ok) {
+    const errorMsg = prWait.error ?? "Failed waiting for PR creation to complete";
+    setStepStatus("pr", "failed", errorMsg);
+    update({ error: errorMsg, isFinished: true });
+    return state;
   }
 
   // Fetch created PR
