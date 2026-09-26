@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Issue } from "../src/github/issues.ts";
 import { formatPlainIssues, renderPane, type ListModel } from "../src/ui/render.ts";
-import { boardRows, parentMapNumber, ticketKind } from "../src/wayfinder/board.ts";
+import { boardRows, parentMapNumber, ticketKind, sortChildren } from "../src/wayfinder/board.ts";
 
 function issue(partial: Partial<Issue> & Pick<Issue, "number" | "title" | "labels">): Issue {
   return {
@@ -59,6 +59,31 @@ describe("parentMapNumber", () => {
   test("reads the Part of line", () => {
     expect(parentMapNumber("Part of #140\n\n## Question\n")).toBe(140);
     expect(parentMapNumber("no parent")).toBeUndefined();
+  });
+});
+
+describe("sortChildren", () => {
+  test("places unblocked tickets before blocked tickets", () => {
+    const t1 = issue({ number: 182, title: "Role and grants", labels: ["ready-for-agent"], body: "Part of #140\nBlocked by: None" });
+    const t2 = issue({ number: 184, title: "Serve /studio and /admin", labels: ["ready-for-agent"], body: "Part of #140\nBlocked by: None" });
+    const t3 = issue({ number: 190, title: "Build operator ledger", labels: ["ready-for-agent"], body: "Part of #140\nBlocked by: #182, #184" });
+    const sorted = sortChildren([t3, t2, t1]);
+    expect(sorted.map((t) => t.number)).toEqual([182, 184, 190]);
+  });
+
+  test("sorts multi-level dependency chains topologically", () => {
+    const root = issue({ number: 10, title: "Root", labels: ["ready-for-agent"], body: "Part of #1\nBlocked by: None" });
+    const mid = issue({ number: 20, title: "Mid", labels: ["ready-for-agent"], body: "Part of #1\nBlocked by: #10" });
+    const leaf = issue({ number: 30, title: "Leaf", labels: ["ready-for-agent"], body: "Part of #1\nBlocked by: #20" });
+    const sorted = sortChildren([leaf, root, mid]);
+    expect(sorted.map((t) => t.number)).toEqual([10, 20, 30]);
+  });
+
+  test("places closed tickets at the bottom", () => {
+    const openTicket = issue({ number: 50, title: "Open", labels: ["ready-for-agent"], body: "Part of #1\nBlocked by: None" });
+    const closedTicket = issue({ number: 10, title: "Closed", labels: ["ready-for-agent"], body: "Part of #1\n", closed: true });
+    const sorted = sortChildren([closedTicket, openTicket]);
+    expect(sorted.map((t) => t.number)).toEqual([50, 10]);
   });
 });
 

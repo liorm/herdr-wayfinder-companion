@@ -85,7 +85,7 @@ export function boardRows(issues: Issue[], options?: BoardOptions): BoardRow[] {
   for (const map of maps) {
     emitted.add(map.number);
     rows.push(issueRow(map, 0, issues, options));
-    for (const child of sortChildren(children.get(map.number) ?? [])) {
+    for (const child of sortChildren(children.get(map.number) ?? [], issues)) {
       emitted.add(child.number);
       rows.push(issueRow(child, 1, issues, options));
     }
@@ -103,7 +103,7 @@ export function boardRows(issues: Issue[], options?: BoardOptions): BoardRow[] {
     } else if (!parentIssue) {
       rows.push({ type: "label", text: `Map #${parent}` });
     }
-    for (const child of sortChildren(children.get(parent) ?? [])) {
+    for (const child of sortChildren(children.get(parent) ?? [], issues)) {
       if (emitted.has(child.number)) continue;
       emitted.add(child.number);
       rows.push(issueRow(child, 1, issues, options));
@@ -136,8 +136,59 @@ function usesMaps(issues: Issue[]): boolean {
   );
 }
 
-function sortChildren(issues: Issue[]): Issue[] {
-  return [...issues].sort((a, b) => a.number - b.number);
+export function sortChildren(issues: Issue[], all: Issue[] = issues): Issue[] {
+  const openNumbers = new Set(all.filter((item) => !item.closed).map((item) => item.number));
+  const childMap = new Map(issues.map((issue) => [issue.number, issue]));
+
+  const levels = new Map<number, number>();
+  const visiting = new Set<number>();
+
+  function getLevel(issue: Issue): number {
+    if (issue.closed) return Infinity;
+    if (levels.has(issue.number)) return levels.get(issue.number)!;
+    if (visiting.has(issue.number)) return 0;
+
+    visiting.add(issue.number);
+
+    const blockers = blockerNumbers(issue.body);
+    const openBlockers = blockers.filter((num) => openNumbers.has(num));
+
+    if (openBlockers.length === 0) {
+      visiting.delete(issue.number);
+      levels.set(issue.number, 0);
+      return 0;
+    }
+
+    let maxBlockerLevel = 0;
+    for (const blockerNum of openBlockers) {
+      const blockerIssue = childMap.get(blockerNum);
+      if (blockerIssue) {
+        maxBlockerLevel = Math.max(maxBlockerLevel, getLevel(blockerIssue));
+      } else {
+        maxBlockerLevel = Math.max(maxBlockerLevel, 0);
+      }
+    }
+
+    visiting.delete(issue.number);
+    const level = 1 + maxBlockerLevel;
+    levels.set(issue.number, level);
+    return level;
+  }
+
+  return [...issues].sort((a, b) => {
+    if (a.closed !== b.closed) {
+      return a.closed ? 1 : -1;
+    }
+    if (a.closed && b.closed) {
+      return a.number - b.number;
+    }
+    const levelA = getLevel(a);
+    const levelB = getLevel(b);
+    if (levelA !== levelB) {
+      return levelA - levelB;
+    }
+    return a.number - b.number;
+  });
 }
 
 export function isIssueBlocked(issue: Issue, all: Issue[]): boolean {
