@@ -8,7 +8,13 @@ import {
   getCachedIssues,
   saveCachedIssues,
 } from "../github/cache.ts";
-import { listGitBranches, findAssociatedBranch } from "../git.ts";
+import {
+  listGitBranches,
+  findAssociatedBranch,
+  listPullRequests,
+  matchPullRequestsToIssues,
+  type PRInfo,
+} from "../git.ts";
 import { formatPlainIssues } from "./render.ts";
 import { readRuntime, type PluginRuntime } from "../runtime.ts";
 import { resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
@@ -23,6 +29,7 @@ export interface IssuePaneOptions {
   refreshIntervalMs?: number;
   fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
   fetchBranches?: (cwd: string) => Promise<string[]>;
+  fetchPRs?: (cwd: string) => Promise<PRInfo[]>;
 }
 
 export async function refreshBoardState(
@@ -31,11 +38,13 @@ export async function refreshBoardState(
   runtime?: PluginRuntime,
   fetchSibling: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined> = resolveSiblingAgent,
   fetchBranches: (cwd: string) => Promise<string[]> = listGitBranches,
+  fetchPRs: (cwd: string) => Promise<PRInfo[]> = listPullRequests,
 ) {
-  const [loaded, sibling, gitBranches] = await Promise.all([
+  const [loaded, sibling, gitBranches, pullRequests] = await Promise.all([
     loadIssues(cwd, currentState),
     runtime ? fetchSibling(runtime).catch(() => undefined) : Promise.resolve(undefined),
     fetchBranches(cwd).catch(() => [] as string[]),
+    fetchPRs(cwd).catch(() => [] as PRInfo[]),
   ]);
   if (loaded.ok) {
     saveCachedIssues(cwd, currentState, loaded.repo, loaded.issues, runtime?.stateDir);
@@ -49,7 +58,10 @@ export async function refreshBoardState(
       }
     }
   }
-  return { loaded, sibling, branches };
+  const prs: Record<number, PRInfo> = loaded.ok
+    ? matchPullRequestsToIssues(loaded.issues, pullRequests, branches)
+    : {};
+  return { loaded, sibling, branches, prs };
 }
 
 export async function runIssuePane(
@@ -59,6 +71,8 @@ export async function runIssuePane(
   try {
     const runtime = options?.runtime ?? readRuntime();
     const fetchSibling = options?.fetchSibling ?? resolveSiblingAgent;
+    const fetchBranches = options?.fetchBranches ?? listGitBranches;
+    const fetchPRs = options?.fetchPRs ?? listPullRequests;
 
     if (!cwd) {
       if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -85,6 +99,8 @@ export async function runIssuePane(
         runtime,
         refreshIntervalMs: options?.refreshIntervalMs,
         fetchSibling,
+        fetchBranches,
+        fetchPRs,
         initialRefresh: true,
       });
     }
@@ -109,6 +125,9 @@ export async function runIssuePane(
       runtime,
       refreshIntervalMs: options?.refreshIntervalMs,
       fetchSibling,
+      fetchBranches,
+      fetchPRs,
+      initialRefresh: true,
     });
   } finally {
     await options?.onClose?.().catch(() => {});
@@ -170,6 +189,8 @@ async function startInkApp(props: {
   runtime?: PluginRuntime;
   refreshIntervalMs?: number;
   fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
+  fetchBranches?: (cwd: string) => Promise<string[]>;
+  fetchPRs?: (cwd: string) => Promise<PRInfo[]>;
 }): Promise<number> {
   const isTTY = process.stdin.isTTY;
   if (isTTY) {
@@ -189,6 +210,8 @@ async function startInkApp(props: {
         runtime={props.runtime}
         refreshIntervalMs={props.refreshIntervalMs}
         fetchSibling={props.fetchSibling}
+        fetchBranches={props.fetchBranches}
+        fetchPRs={props.fetchPRs}
       />,
       { exitOnCtrlC: false },
     );

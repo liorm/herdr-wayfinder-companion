@@ -236,11 +236,10 @@ function badgesFor(
     const extras = issue.labels.filter((label) => !isKindLabel(label, kind));
     if (extras.length > 0) badges.push(extras.join(", "));
   }
-  if (branch) {
-    badges.push(branch);
-  }
   if (pr) {
     badges.push(`PR #${pr.number}`);
+  } else if (branch) {
+    badges.push(branch);
   }
   if (issue.closed) badges.push("closed");
   if (blocked) badges.push("blocked");

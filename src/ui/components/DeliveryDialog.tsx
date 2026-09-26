@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import type { Issue } from "../../github/issues.ts";
 import type { ModifiedFile, PRInfo } from "../../git.ts";
 import type { DeliveryStep } from "../../wayfinder/delivery.ts";
+import { clipText, padLine, centerLine } from "../dialog.ts";
 
 export interface DeliveryDialogProps {
   issue: Issue;
@@ -22,24 +23,6 @@ export interface DeliveryDialogProps {
 }
 
 const SPINNER_FRAMES = ["Oo", "oO", "oo", "OO", "oO", "Oo"];
-
-function padLine(str: string, len: number): string {
-  const visible = [...str.replace(/\x1b\[[0-9;]*m/g, "")].length;
-  return str + " ".repeat(Math.max(0, len - visible));
-}
-
-function centerLine(str: string, len: number): string {
-  const visible = [...str.replace(/\x1b\[[0-9;]*m/g, "")].length;
-  const left = Math.max(0, Math.floor((len - visible) / 2));
-  const right = Math.max(0, len - visible - left);
-  return " ".repeat(left) + str + " ".repeat(right);
-}
-
-function clipText(str: string, maxLen: number): string {
-  const plain = str.replace(/\x1b\[[0-9;]*m/g, "");
-  if (plain.length <= maxLen) return str;
-  return str.slice(0, Math.max(0, maxLen - 1)) + "…";
-}
 
 export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
   issue,
@@ -79,7 +62,8 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
         ? "green"
         : "cyan";
 
-  const headerTitle = clipText(` Delivery Work: #${issue.number} ${issue.title} `, innerWidth - 4);
+  const headerTitle = clipText(`Delivery Work: #${issue.number} ${issue.title}`, innerWidth - 6);
+  const branchLine = clipText(`Branch: ${branchName} (base: main)`, innerWidth - 2);
 
   return (
     <Box
@@ -98,7 +82,7 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
         borderColor={borderColor}
       >
         <Text>{padLine(` \x1b[1;${error ? "31" : isFinished ? "32" : "36"}m[ ${headerTitle} ]\x1b[0m`, innerWidth)}</Text>
-        <Text>{padLine(` Branch: \x1b[1;36m${branchName}\x1b[0m \x1b[2m(base: main)\x1b[0m`, innerWidth)}</Text>
+        <Text>{padLine(` \x1b[1;36m${branchLine}\x1b[0m`, innerWidth)}</Text>
         <Text>{padLine("", innerWidth)}</Text>
 
         {alreadyDelivered ? (
@@ -106,8 +90,8 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
             <Text>{padLine(" \x1b[1;33m⚠️  Ticket has already been delivered with a PR.\x1b[0m", innerWidth)}</Text>
             {existingPR ? (
               <>
-                <Text>{padLine(` PR: \x1b[1;36m#${existingPR.number} ${existingPR.title}\x1b[0m`, innerWidth)}</Text>
-                <Text>{padLine(` URL: \x1b[4;34m${existingPR.url}\x1b[0m`, innerWidth)}</Text>
+                <Text>{padLine(` \x1b[1;36m${clipText(`PR: #${existingPR.number} ${existingPR.title}`, innerWidth - 2)}\x1b[0m`, innerWidth)}</Text>
+                <Text>{padLine(` \x1b[4;34m${clipText(`URL: ${existingPR.url}`, innerWidth - 2)}\x1b[0m`, innerWidth)}</Text>
               </>
             ) : null}
             <Text>{padLine("", innerWidth)}</Text>
@@ -116,15 +100,18 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
         ) : !isStarted ? (
           <Box flexDirection="column">
             <Text>{padLine(" \x1b[1mSteps to execute:\x1b[0m", innerWidth)}</Text>
-            {steps.map((step, idx) => (
-              <Text key={`preview-${step.id}`}>
-                {padLine(`   \x1b[2m[ ] ${idx + 1}. ${step.title}\x1b[0m`, innerWidth)}
-              </Text>
-            ))}
+            {steps.map((step, idx) => {
+              const stepText = clipText(`[ ] ${idx + 1}. ${step.title}`, innerWidth - 4);
+              return (
+                <Text key={`preview-${step.id}`}>
+                  {padLine(`   \x1b[2m${stepText}\x1b[0m`, innerWidth)}
+                </Text>
+              );
+            })}
             <Text>{padLine("", innerWidth)}</Text>
             <Text>
               {centerLine(
-                "\x1b[7;1;32m  Start Work  \x1b[0m \x1b[2m(Enter or Space)\x1b[0m   \x1b[2m(Esc or q to cancel)\x1b[0m",
+                "\x1b[7;1;32m  Start Work  \x1b[0m \x1b[2m(Enter/Space)\x1b[0m   \x1b[2m(Esc/q cancel)\x1b[0m",
                 innerWidth,
               )}
             </Text>
@@ -147,12 +134,13 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
                 styleOpen = "\x1b[1;31m";
               }
 
+              const errText = step.error ? ` (${step.error})` : "";
+              const stepContent = clipText(`${idx + 1}. ${step.title}${errText}`, innerWidth - 6);
+
               return (
                 <Text key={`step-${step.id}`}>
                   {padLine(
-                    ` ${icon}${styleOpen}${idx + 1}. ${step.title}${styleClose}${
-                      step.error ? ` \x1b[31m(${step.error})\x1b[0m` : ""
-                    }`,
+                    ` ${icon}${styleOpen}${stepContent}${styleClose}`,
                     innerWidth,
                   )}
                 </Text>
@@ -160,7 +148,8 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
             })}
 
             {modifiedFiles.length > 0 ? (
-              <Box flexDirection="column" marginTop={1}>
+              <Box flexDirection="column">
+                <Text>{padLine("", innerWidth)}</Text>
                 <Text>
                   {padLine(
                     ` \x1b[1mModified files (${modifiedFiles.length}):\x1b[0m`,
@@ -174,10 +163,11 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
                   } else if (file.status === "deleted") {
                     colorCode = "31m-";
                   }
+                  const filePath = clipText(file.path, innerWidth - 7);
                   return (
                     <Text key={`file-${file.path}`}>
                       {padLine(
-                        `   \x1b[1;${colorCode} ${clipText(file.path, innerWidth - 8)}\x1b[0m`,
+                        `   \x1b[1;${colorCode} ${filePath}\x1b[0m`,
                         innerWidth,
                       )}
                     </Text>
@@ -193,12 +183,13 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
 
             {agentMessage && !isFinished ? (
               <Text>
-                {padLine(` \x1b[2mAgent: ${clipText(agentMessage, innerWidth - 10)}\x1b[0m`, innerWidth)}
+                {padLine(` \x1b[2m${clipText(`Agent: ${agentMessage}`, innerWidth - 2)}\x1b[0m`, innerWidth)}
               </Text>
             ) : null}
 
             {isFinished && pr ? (
-              <Box flexDirection="column" marginTop={1}>
+              <Box flexDirection="column">
+                <Text>{padLine("", innerWidth)}</Text>
                 <Text>
                   {padLine(
                     ` \x1b[1;32m🎉 Delivery PR Created:\x1b[0m \x1b[1;36m#${pr.number} ${clipText(
@@ -208,12 +199,13 @@ export const DeliveryDialog: React.FC<DeliveryDialogProps> = ({
                     innerWidth,
                   )}
                 </Text>
-                <Text>{padLine(`    \x1b[4;34m${pr.url}\x1b[0m`, innerWidth)}</Text>
+                <Text>{padLine(`    \x1b[4;34m${clipText(pr.url, innerWidth - 5)}\x1b[0m`, innerWidth)}</Text>
               </Box>
             ) : null}
 
             {error ? (
-              <Box flexDirection="column" marginTop={1}>
+              <Box flexDirection="column">
+                <Text>{padLine("", innerWidth)}</Text>
                 <Text>{padLine(` \x1b[1;31mError:\x1b[0m ${clipText(error, innerWidth - 10)}`, innerWidth)}</Text>
               </Box>
             ) : null}

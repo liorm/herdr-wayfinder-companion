@@ -532,5 +532,7 @@ describe("refreshBoardState", () => {
     });
     // loadIssues returns not ok for non-existent repo, but refreshBoardState returns both results
     expect(result.loaded).toBeDefined();
+    expect(result.branches).toBeDefined();
+    expect(result.prs).toBeDefined();
   });
 });

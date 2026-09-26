@@ -85,4 +85,12 @@ describe("formatTicketView", () => {
     expect(lines[0]).toContain("\x1b[32m");
     expect(lines[1]).toContain("\x1b[1m");
   });
+
+  test("renders PR link line when PR option is provided", () => {
+    const lines = formatTicketView(issue, view, comments, 80, [issue], {
+      prs: { 7: { number: 99, url: "https://github.com/org/repo/pull/99", state: "open" } },
+    });
+    const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
+    expect(plain.join("\n")).toContain("Pull Request: PR #99 • https://github.com/org/repo/pull/99 [open]");
+  });
 });

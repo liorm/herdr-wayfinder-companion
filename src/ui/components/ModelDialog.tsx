@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { getAvailableModels, normalizeAgentKind } from "../../wayfinder/models.ts";
+import { clipText, padLine, centerLine } from "../dialog.ts";
 
 export interface ModelDialogProps {
   kind: string;
@@ -10,18 +11,6 @@ export interface ModelDialogProps {
   selectedIndex: number;
   columns: number;
   rows: number;
-}
-
-function padLine(str: string, len: number): string {
-  const visible = [...str.replace(/\x1b\[[0-9;]*m/g, "")].length;
-  return str + " ".repeat(Math.max(0, len - visible));
-}
-
-function centerLine(str: string, len: number): string {
-  const visible = [...str.replace(/\x1b\[[0-9;]*m/g, "")].length;
-  const left = Math.max(0, Math.floor((len - visible) / 2));
-  const right = Math.max(0, len - visible - left);
-  return " ".repeat(left) + str + " ".repeat(right);
 }
 
 export const ModelDialog: React.FC<ModelDialogProps> = ({
@@ -38,9 +27,10 @@ export const ModelDialog: React.FC<ModelDialogProps> = ({
   const normAgent = normalizeAgentKind(agent);
   const availableModels = getAvailableModels(normAgent);
 
-  const headerTitle = issueNumber
+  const titleContent = issueNumber
     ? `Choose Model (${normAgent}): #${issueNumber} (${kind})`
     : `Choose Model (${normAgent}): ${kind}`;
+  const headerTitle = clipText(titleContent, innerWidth - 6);
 
   return (
     <Box
@@ -66,11 +56,11 @@ export const ModelDialog: React.FC<ModelDialogProps> = ({
           const isActive = model === currentModel;
           const prefix = isHovered ? "❯ " : "  ";
           const suffix = isActive ? " \x1b[2m(current)\x1b[0m" : "";
-          const text = `${prefix}${model}${suffix}`;
+          const lineText = clipText(`${prefix}${model}${suffix}`, innerWidth - 2);
 
           return (
             <Text key={model} inverse={isHovered}>
-              {padLine(` ${text}`, innerWidth)}
+              {padLine(` ${lineText}`, innerWidth)}
             </Text>
           );
         })}

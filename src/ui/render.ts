@@ -2,6 +2,7 @@ import { ISSUE_LIMIT, type Issue, type IssueState } from "../github/issues.ts";
 import { boardRows, lineOfSelection, selectableIssues, type BoardRow, type RowTone } from "../wayfinder/board.ts";
 import type { SiblingAgent } from "../sibling.ts";
 import { formatTicketView, TICKET_FOOTER } from "./ticket.ts";
+import { centerLine, padLine } from "./dialog.ts";
 
 export interface ListModel {
   kind: "list";
@@ -223,17 +224,6 @@ function dialogLines(model: DialogModel, columns: number, rows: number): string[
   return output.slice(0, rows);
 }
 
-function padLine(str: string, len: number): string {
-  const visible = [...str.replace(/\x1b\[[0-9;]*m/g, "")].length;
-  return str + " ".repeat(Math.max(0, len - visible));
-}
-
-function centerLine(str: string, len: number): string {
-  const visible = [...str.replace(/\x1b\[[0-9;]*m/g, "")].length;
-  const left = Math.max(0, Math.floor((len - visible) / 2));
-  const right = Math.max(0, len - visible - left);
-  return " ".repeat(left) + str + " ".repeat(right);
-}
 
 function rowText(row: BoardRow, width: number): string {
   if (row.type === "label") return clip(row.text, width);

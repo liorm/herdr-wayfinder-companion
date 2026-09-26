@@ -1,4 +1,4 @@
-import { defaultGh, type GhRunner } from "./github/issues.ts";
+import { defaultGh, type GhRunner, type Issue } from "./github/issues.ts";
 
 export interface GitOutput {
   status: number;
@@ -313,4 +313,81 @@ export async function findTicketPR(
   }
 
   return null;
+}
+
+/**
+ * Lists recent pull requests for the workspace repository via gh pr list.
+ */
+export async function listPullRequests(
+  cwd: string,
+  runGh: GhRunner = defaultGh,
+): Promise<PRInfo[]> {
+  const result = await runGh(
+    [
+      "pr",
+      "list",
+      "--state",
+      "all",
+      "--limit",
+      "100",
+      "--json",
+      "number,title,url,state,headRefName",
+    ],
+    cwd,
+  );
+  if (result.status !== 0) return [];
+  try {
+    const parsed = JSON.parse(result.stdout) as unknown[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+      .map((pr) => ({
+        number: Number(pr.number),
+        title: String(pr.title ?? ""),
+        url: String(pr.url ?? ""),
+        state: String(pr.state ?? "").toLowerCase(),
+        headRefName: pr.headRefName ? String(pr.headRefName) : undefined,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Matches pull requests to issues based on head branch or issue references in PR title.
+ */
+export function matchPullRequestsToIssues(
+  issues: Issue[],
+  prs: PRInfo[],
+  branches?: Record<number, string>,
+): Record<number, PRInfo> {
+  const matched: Record<number, PRInfo> = {};
+  for (const issue of issues) {
+    const branch = branches?.[issue.number];
+    let found = branch ? prs.find((pr) => pr.headRefName === branch) : undefined;
+    if (!found) {
+      found = prs.find((pr) => pr.headRefName?.startsWith(`${issue.number}-`));
+    }
+    if (!found) {
+      const regex = new RegExp(`(#|\\b)${issue.number}\\b`);
+      found = prs.find((pr) => regex.test(pr.title));
+    }
+    if (found) {
+      matched[issue.number] = found;
+    }
+  }
+  return matched;
+}
+
+/**
+ * Opens a URL in the user's default browser.
+ */
+export function openInBrowser(url: string): void {
+  if (!url) return;
+  const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+  try {
+    Bun.spawn([cmd, url], { stdout: "ignore", stderr: "ignore" });
+  } catch {
+    // ignore
+  }
 }

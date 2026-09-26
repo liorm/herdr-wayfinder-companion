@@ -5,6 +5,8 @@ import {
   formatTicketBranch,
   getModifiedFiles,
   listGitBranches,
+  listPullRequests,
+  matchPullRequestsToIssues,
   parseGitStatus,
   prepareDeliveryBranch,
   type GitRunner,
@@ -220,5 +222,83 @@ describe("findTicketPR", () => {
     expect(pr).not.toBeNull();
     expect(pr?.number).toBe(456);
     expect(pr?.state).toBe("merged");
+  });
+});
+
+describe("listPullRequests and matchPullRequestsToIssues", () => {
+  test("lists pull requests from gh pr list and parses attributes", async () => {
+    const mockGh: GhRunner = async () => ({
+      status: 0,
+      stdout: JSON.stringify([
+        {
+          number: 10,
+          title: "Add sessions feature for #180",
+          url: "https://github.com/org/repo/pull/10",
+          state: "OPEN",
+          headRefName: "180-end-a-persons-exis",
+        },
+        {
+          number: 11,
+          title: "Map #140 updates",
+          url: "https://github.com/org/repo/pull/11",
+          state: "CLOSED",
+          headRefName: "140-map-updates",
+        },
+      ]),
+      stderr: "",
+    });
+
+    const prs = await listPullRequests("/fake/repo", mockGh);
+    expect(prs).toHaveLength(2);
+    expect(prs[0]).toEqual({
+      number: 10,
+      title: "Add sessions feature for #180",
+      url: "https://github.com/org/repo/pull/10",
+      state: "open",
+      headRefName: "180-end-a-persons-exis",
+    });
+  });
+
+  test("matches pull requests to issues by branch, prefix, and title", () => {
+    const sampleIssues = [
+      {
+        number: 180,
+        title: "End a person's existing sessions",
+        url: "https://github.com/org/repo/issues/180",
+        closed: false,
+        labels: ["ready-for-agent"],
+        assignees: [],
+      },
+      {
+        number: 140,
+        title: "Map 140",
+        url: "https://github.com/org/repo/issues/140",
+        closed: false,
+        labels: ["wayfinder:map"],
+        assignees: [],
+      },
+    ];
+
+    const prs = [
+      {
+        number: 10,
+        title: "Add sessions feature for #180",
+        url: "https://github.com/org/repo/pull/10",
+        state: "open",
+        headRefName: "180-end-a-persons-exis",
+      },
+      {
+        number: 11,
+        title: "Map 140 updates",
+        url: "https://github.com/org/repo/pull/11",
+        state: "closed",
+        headRefName: "custom-branch",
+      },
+    ];
+
+    const matched = matchPullRequestsToIssues(sampleIssues, prs, { 180: "180-end-a-persons-exis" });
+    expect(matched[180]?.number).toBe(10);
+    expect(matched[180]?.url).toBe("https://github.com/org/repo/pull/10");
+    expect(matched[140]?.number).toBe(11);
   });
 });

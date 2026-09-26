@@ -1,9 +1,9 @@
 import type { Issue } from "../github/issues.ts";
-import { boardRows, type RowTone } from "../wayfinder/board.ts";
+import { boardRows, type BoardOptions, type RowTone } from "../wayfinder/board.ts";
 import { formatMarkdown } from "./markdown.ts";
 
 /** Ticket view footer. `q` closes the whole plugin, so it is not a ticket shortcut. */
-export const TICKET_FOOTER = "j/k scroll   esc back";
+export const TICKET_FOOTER = "j/k scroll   esc back   o open   w work";
 
 export interface IssueViewFields {
   [key: string]: string;
@@ -82,12 +82,13 @@ export function formatTicketView(
   commentsText: string,
   columns: number,
   issues: Issue[] = [issue],
+  options?: BoardOptions,
 ): string[] {
   const width = Math.max(columns, 1);
   const parsed = parseIssueView(viewText);
   const description = parsed.body.trim() || issue.body?.trim() || "";
   const { comments, rest } = parseRawComments(commentsText);
-  const { tone, badges } = describeIssue(issue, issues);
+  const { tone, badges } = describeIssue(issue, issues, options);
   const closed = parsed.fields.state ? parsed.fields.state.toUpperCase() === "CLOSED" : issue.closed;
   const lines: string[] = [];
 
@@ -108,6 +109,12 @@ export function formatTicketView(
   const meta = metaLine(issue, parsed.fields);
   if (meta) {
     for (const line of wrapPlain(meta, width)) lines.push(style(line, "2"));
+  }
+
+  const pr = options?.prs ? (options.prs instanceof Map ? options.prs.get(issue.number) : options.prs[issue.number]) : undefined;
+  if (pr) {
+    const prLine = `Pull Request: PR #${pr.number} • ${pr.url}${pr.state ? ` [${pr.state}]` : ""}`;
+    for (const line of wrapPlain(prLine, width)) lines.push(style(line, "35"));
   }
 
   const hasBody = description.length > 0 || comments.length > 0 || rest.length > 0;
@@ -133,9 +140,9 @@ export function formatTicketView(
   return lines;
 }
 
-function describeIssue(issue: Issue, issues: Issue[]): { tone: RowTone; badges: string[] } {
+function describeIssue(issue: Issue, issues: Issue[], options?: BoardOptions): { tone: RowTone; badges: string[] } {
   const source = issues.some((item) => item.number === issue.number) ? issues : [issue, ...issues];
-  const found = boardRows(source).find((row) => row.type === "issue" && row.issue.number === issue.number);
+  const found = boardRows(source, options).find((row) => row.type === "issue" && row.issue.number === issue.number);
   if (found && found.type === "issue") return { tone: found.tone, badges: found.badges };
   return { tone: issue.closed ? "closed" : "plain", badges: [] };
 }

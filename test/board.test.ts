@@ -148,7 +148,19 @@ describe("boardRows", () => {
       issue: blocked,
       depth: 1,
       kind: "delivery",
-      badges: ["delivery", "171-assign-strip-creator", "PR #45", "blocked"],
+      badges: ["delivery", "PR #45", "blocked"],
+      tone: "blocked",
+    });
+
+    const rowsWithBranchOnly = boardRows([claimed, blocked], {
+      branches: { 171: "171-assign-strip-creator" },
+    });
+    expect(rowsWithBranchOnly[2]).toEqual({
+      type: "issue",
+      issue: blocked,
+      depth: 1,
+      kind: "delivery",
+      badges: ["delivery", "171-assign-strip-creator", "blocked"],
       tone: "blocked",
     });
   });

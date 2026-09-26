@@ -18,7 +18,7 @@ import {
   runDeliveryWorkflow,
   type DeliveryState,
 } from "../wayfinder/delivery.ts";
-import { findTicketPR, type GitRunner, type PRInfo } from "../git.ts";
+import { findTicketPR, openInBrowser, type GitRunner, type PRInfo } from "../git.ts";
 import { preserveSelection, reveal } from "./render.ts";
 import { formatTicketView } from "./ticket.ts";
 import { ListView } from "./components/ListView.tsx";
@@ -59,6 +59,7 @@ export interface AppProps {
   refreshIntervalMs?: number;
   fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
   fetchBranches?: (cwd: string) => Promise<string[]>;
+  fetchPRs?: (cwd: string) => Promise<PRInfo[]>;
   herdrClient?: (args: string[]) => Promise<HerdrCall>;
   runGit?: GitRunner;
   runGh?: GhRunner;
@@ -80,6 +81,7 @@ export const App: React.FC<AppProps> = ({
   refreshIntervalMs = 5000,
   fetchSibling = resolveSiblingAgent,
   fetchBranches,
+  fetchPRs,
   herdrClient,
   runGit,
   runGh,
@@ -178,11 +180,14 @@ export const App: React.FC<AppProps> = ({
   // Re-wrap the ticket when the pane width changes. The header scrolls with the body.
   useEffect(() => {
     if (mode === "detail" && detailIssue) {
-      const next = formatTicketView(detailIssue, detailRawBody, detailComments, dimensions.columns, issues);
+      const next = formatTicketView(detailIssue, detailRawBody, detailComments, dimensions.columns, issues, {
+        branches,
+        prs,
+      });
       setDetailLines(next);
       setDetailScroll((prev) => Math.min(prev, Math.max(0, next.length - detailWindow)));
     }
-  }, [dimensions.columns, mode, detailIssue, detailRawBody, detailComments, issues, detailWindow]);
+  }, [dimensions.columns, mode, detailIssue, detailRawBody, detailComments, issues, branches, prs, detailWindow]);
 
   // Immediate initial background refresh if requested (e.g. fast startup from cache)
   useEffect(() => {
@@ -190,12 +195,13 @@ export const App: React.FC<AppProps> = ({
     let cancelled = false;
     (async () => {
       try {
-        const { loaded, sibling: newSibling, branches: newBranches } = await refreshBoardState(
+        const { loaded, sibling: newSibling, branches: newBranches, prs: newPrs } = await refreshBoardState(
           cwd,
           stateRef.current,
           runtime,
           fetchSibling,
           fetchBranches,
+          fetchPRs,
         );
         if (cancelled) return;
         if (newSibling !== undefined) {
@@ -204,10 +210,15 @@ export const App: React.FC<AppProps> = ({
         if (newBranches) {
           setBranches(newBranches);
         }
+        if (newPrs) {
+          setPrs(newPrs);
+        }
         if (loaded.ok) {
           const prevNumber = issuesRef.current[selectedRef.current]?.number;
           const currentSel = selectedRef.current;
-          const nextArranged = selectableIssues(boardRows(loaded.issues, { branches: newBranches, prs: prsRef.current }));
+          const nextArranged = selectableIssues(
+            boardRows(loaded.issues, { branches: newBranches ?? branchesRef.current, prs: newPrs ?? prsRef.current }),
+          );
           const newSel = preserveSelection(nextArranged, currentSel, prevNumber);
           setRepo(loaded.repo);
           setIssues(nextArranged);
@@ -220,7 +231,7 @@ export const App: React.FC<AppProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [initialRefresh, cwd, runtime, fetchSibling, fetchBranches]);
+  }, [initialRefresh, cwd, runtime, fetchSibling, fetchBranches, fetchPRs]);
 
   // Background refresh
   useEffect(() => {
@@ -231,12 +242,13 @@ export const App: React.FC<AppProps> = ({
       refreshingRef.current = true;
       try {
         const currentState = stateRef.current;
-        const { loaded, sibling: newSibling, branches: newBranches } = await refreshBoardState(
+        const { loaded, sibling: newSibling, branches: newBranches, prs: newPrs } = await refreshBoardState(
           cwd,
           currentState,
           runtime,
           fetchSibling,
           fetchBranches,
+          fetchPRs,
         );
         if (newSibling !== undefined) {
           setSibling(newSibling);
@@ -244,10 +256,15 @@ export const App: React.FC<AppProps> = ({
         if (newBranches) {
           setBranches(newBranches);
         }
+        if (newPrs) {
+          setPrs(newPrs);
+        }
         if (loaded.ok) {
           const prevNumber = issuesRef.current[selectedRef.current]?.number;
           const currentSel = selectedRef.current;
-          const nextArranged = selectableIssues(boardRows(loaded.issues, { branches: newBranches, prs: prsRef.current }));
+          const nextArranged = selectableIssues(
+            boardRows(loaded.issues, { branches: newBranches ?? branchesRef.current, prs: newPrs ?? prsRef.current }),
+          );
           const newSel = preserveSelection(nextArranged, currentSel, prevNumber);
           setRepo(loaded.repo);
           setIssues(nextArranged);
@@ -534,6 +551,16 @@ export const App: React.FC<AppProps> = ({
         await handleWorkPress(detailIssue);
         return;
       }
+      if (input === "o" || input === "O") {
+        if (!detailIssue) return;
+        const pr = prs[detailIssue.number];
+        const targetUrl = pr?.url || detailIssue.url;
+        if (targetUrl) {
+          openInBrowser(targetUrl);
+          setNotice(`Opened ${pr ? `PR #${pr.number}` : `#${detailIssue.number}`} in browser`);
+        }
+        return;
+      }
       if (isCtrlM) {
         const agentKind = sibling?.agent;
         const currentKind = detailIssue ? ticketKind(detailIssue.labels) : "map";
@@ -588,6 +615,17 @@ export const App: React.FC<AppProps> = ({
         await handleWorkPress(currentIssue);
         return;
       }
+      if (input === "o" || input === "O") {
+        const currentIssue = issues[selected];
+        if (!currentIssue) return;
+        const pr = prs[currentIssue.number];
+        const targetUrl = pr?.url || currentIssue.url;
+        if (targetUrl) {
+          openInBrowser(targetUrl);
+          setNotice(`Opened ${pr ? `PR #${pr.number}` : `#${currentIssue.number}`} in browser`);
+        }
+        return;
+      }
       if (isCtrlM) {
         const agentKind = sibling?.agent;
         const currentIssue = issues[selected];
@@ -635,17 +673,19 @@ export const App: React.FC<AppProps> = ({
           setScroll(0);
         }
         setNotice(`Loading ${next} issues…`);
-        const { loaded, sibling: newSibling, branches: newBranches } = await refreshBoardState(
+        const { loaded, sibling: newSibling, branches: newBranches, prs: newPrs } = await refreshBoardState(
           cwd,
           next,
           runtime,
           fetchSibling,
           fetchBranches,
+          fetchPRs,
         );
         if (newSibling !== undefined) setSibling(newSibling);
         if (newBranches) setBranches(newBranches);
+        if (newPrs) setPrs(newPrs);
         if (loaded.ok) {
-          const nextArranged = selectableIssues(boardRows(loaded.issues, { branches: newBranches ?? branches, prs }));
+          const nextArranged = selectableIssues(boardRows(loaded.issues, { branches: newBranches ?? branches, prs: newPrs ?? prs }));
           setRepo(loaded.repo);
           setState(loaded.state);
           setIssues(nextArranged);
@@ -666,19 +706,21 @@ export const App: React.FC<AppProps> = ({
         const previous = issues[selected]?.number;
         const currentSel = selected;
         setNotice("Refreshing…");
-        const { loaded, sibling: newSibling, branches: newBranches } = await refreshBoardState(
+        const { loaded, sibling: newSibling, branches: newBranches, prs: newPrs } = await refreshBoardState(
           cwd,
           state,
           runtime,
           fetchSibling,
           fetchBranches,
+          fetchPRs,
         );
         if (newSibling !== undefined) setSibling(newSibling);
         if (newBranches) setBranches(newBranches);
+        if (newPrs) setPrs(newPrs);
         if (loaded.ok) {
-          const nextArranged = selectableIssues(boardRows(loaded.issues, { branches: newBranches ?? branches, prs }));
+          const nextArranged = selectableIssues(boardRows(loaded.issues, { branches: newBranches ?? branches, prs: newPrs ?? prs }));
           const newSel = preserveSelection(nextArranged, currentSel, previous);
-          const laid = boardRows(nextArranged, { branches: newBranches ?? branches, prs });
+          const laid = boardRows(nextArranged, { branches: newBranches ?? branches, prs: newPrs ?? prs });
           const line = lineOfSelection(laid, newSel);
           setRepo(loaded.repo);
           setIssues(nextArranged);
@@ -703,7 +745,7 @@ export const App: React.FC<AppProps> = ({
           setDetailIssue(currentIssue);
           setDetailRawBody(fallback);
           setDetailComments(comments);
-          setDetailLines(formatTicketView(currentIssue, fallback, comments, dimensions.columns, issues));
+          setDetailLines(formatTicketView(currentIssue, fallback, comments, dimensions.columns, issues, { branches, prs }));
           setDetailScroll(0);
           setNotice(undefined);
           setMode("detail");

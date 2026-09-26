@@ -1,5 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
+import stringWidth from "string-width";
+import { clipText, padLine, centerLine } from "../dialog.ts";
 
 export interface ErrorDialogProps {
   title?: string;
@@ -9,18 +11,6 @@ export interface ErrorDialogProps {
   rows: number;
 }
 
-function padLine(str: string, len: number): string {
-  const visible = [...str.replace(/\x1b\[[0-9;]*m/g, "")].length;
-  return str + " ".repeat(Math.max(0, len - visible));
-}
-
-function centerLine(str: string, len: number): string {
-  const visible = [...str.replace(/\x1b\[[0-9;]*m/g, "")].length;
-  const left = Math.max(0, Math.floor((len - visible) / 2));
-  const right = Math.max(0, len - visible - left);
-  return " ".repeat(left) + str + " ".repeat(right);
-}
-
 function wrapWords(text: string, width: number): string[] {
   if (width <= 0) return [""];
   const words = text.split(/\s+/);
@@ -28,9 +18,17 @@ function wrapWords(text: string, width: number): string[] {
   let current = "";
   for (const word of words) {
     if (!word) continue;
+    if (stringWidth(word) > width) {
+      if (current) {
+        lines.push(current);
+        current = "";
+      }
+      lines.push(clipText(word, width));
+      continue;
+    }
     if (!current) {
       current = word;
-    } else if (current.length + 1 + word.length <= width) {
+    } else if (stringWidth(current) + 1 + stringWidth(word) <= width) {
       current += " " + word;
     } else {
       lines.push(current);
@@ -53,6 +51,7 @@ export const ErrorDialog: React.FC<ErrorDialogProps> = ({
   const iconPrefixWidth = 11; // "  ╔═════╗  "
   const textWidth = Math.max(innerWidth - iconPrefixWidth - 2, 10);
 
+  const headerTitle = clipText(title, innerWidth - 6);
   const messageLines = wrapWords(message, textWidth);
   const detailLines = detail ? wrapWords(detail, textWidth) : [];
   const contentRows = Math.max(3, messageLines.length + (detailLines.length > 0 ? detailLines.length + 1 : 0));
@@ -96,7 +95,7 @@ export const ErrorDialog: React.FC<ErrorDialogProps> = ({
         borderStyle="round"
         borderColor="red"
       >
-        <Text>{padLine(` \x1b[1;31m[ ${title} ]\x1b[0m`, innerWidth)}</Text>
+        <Text>{padLine(` \x1b[1;31m[ ${headerTitle} ]\x1b[0m`, innerWidth)}</Text>
         <Text>{padLine("", innerWidth)}</Text>
         {bodyLines.map((line, idx) => (
           <Text key={`body-${idx}`}>{line}</Text>

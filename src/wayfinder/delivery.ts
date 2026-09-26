@@ -113,7 +113,7 @@ export interface DeliveryWorkflowOptions extends ModelResolutionOptions {
 export async function waitForAgentIdle(
   target: string,
   client: (args: string[]) => Promise<HerdrCall>,
-  maxWaitMs = 15000,
+  maxWaitMs?: number,
   pollIntervalMs = 500,
   onPoll?: (status: string | undefined, message: string | undefined) => void | Promise<void>,
 ): Promise<{ ok: boolean; status?: string; message?: string; error?: string }> {
@@ -121,7 +121,7 @@ export async function waitForAgentIdle(
   let lastStatus: string | undefined;
   let lastMessage: string | undefined;
 
-  while (Date.now() - start < maxWaitMs) {
+  while (maxWaitMs === undefined || Date.now() - start < maxWaitMs) {
     const res = await client(["agent", "get", target]);
     if (res.ok && res.json && typeof res.json === "object") {
       const agentInfo = (res.json as { result?: { agent?: { agent_status?: string; title?: string } } }).result?.agent;
@@ -161,7 +161,7 @@ export async function waitForAgentIdle(
 export async function checkAgentSettled(
   target: string,
   client: (args: string[]) => Promise<HerdrCall>,
-  maxWaitMs = 15000,
+  maxWaitMs?: number,
   pollIntervalMs = 500,
   onPoll?: (status: string | undefined, message: string | undefined) => void | Promise<void>,
   startupGraceMs?: number,
@@ -173,7 +173,7 @@ export async function checkAgentSettled(
   const effectiveGraceMs =
     startupGraceMs ?? Math.min(1500, Math.max(pollIntervalMs * 2, 20));
 
-  while (Date.now() - start < maxWaitMs) {
+  while (maxWaitMs === undefined || Date.now() - start < maxWaitMs) {
     const res = await client(["agent", "get", target]);
     if (res.ok && res.json && typeof res.json === "object") {
       const agentInfo = (res.json as { result?: { agent?: { agent_status?: string; title?: string } } }).result?.agent;
@@ -291,7 +291,7 @@ export async function runDeliveryWorkflow(
 
   // --- Step 2: Clear agent session ---
   setStepStatus("clear", "running");
-  const idleBeforeClear = await waitForAgentIdle(target, client, 15000, pollIntervalMs);
+  const idleBeforeClear = await waitForAgentIdle(target, client, options.maxWaitMs, pollIntervalMs);
   if (!idleBeforeClear.ok) {
     const errorMsg = `Agent is not idle before clear: ${idleBeforeClear.error ?? "busy"}`;
     setStepStatus("clear", "failed", errorMsg);
@@ -306,7 +306,7 @@ export async function runDeliveryWorkflow(
     update({ error: errorMsg, isFinished: true });
     return state;
   }
-  const clearWait = await checkAgentSettled(target, client, 15000, pollIntervalMs, undefined, startupGraceMs);
+  const clearWait = await checkAgentSettled(target, client, options.maxWaitMs, pollIntervalMs, undefined, startupGraceMs);
   if (!clearWait.ok) {
     const errorMsg = clearWait.error ?? "Failed waiting for session clear to complete";
     setStepStatus("clear", "failed", errorMsg);
@@ -317,7 +317,7 @@ export async function runDeliveryWorkflow(
 
   // --- Step 3: Set agent model to low effort ---
   setStepStatus("model", "running");
-  const idleBeforeModel = await waitForAgentIdle(target, client, 15000, pollIntervalMs);
+  const idleBeforeModel = await waitForAgentIdle(target, client, options.maxWaitMs, pollIntervalMs);
   if (!idleBeforeModel.ok) {
     const errorMsg = `Agent is not idle before setting model: ${idleBeforeModel.error ?? "busy"}`;
     setStepStatus("model", "failed", errorMsg);
@@ -335,7 +335,7 @@ export async function runDeliveryWorkflow(
     update({ error: errorMsg, isFinished: true });
     return state;
   }
-  const modelWait = await checkAgentSettled(target, client, 15000, pollIntervalMs, undefined, startupGraceMs);
+  const modelWait = await checkAgentSettled(target, client, options.maxWaitMs, pollIntervalMs, undefined, startupGraceMs);
   if (!modelWait.ok) {
     const errorMsg = modelWait.error ?? "Failed waiting for model change to complete";
     setStepStatus("model", "failed", errorMsg);
@@ -346,7 +346,7 @@ export async function runDeliveryWorkflow(
 
   // --- Step 4: Implement ticket ---
   setStepStatus("implement", "running");
-  const idleBeforeImplement = await waitForAgentIdle(target, client, 15000, pollIntervalMs);
+  const idleBeforeImplement = await waitForAgentIdle(target, client, options.maxWaitMs, pollIntervalMs);
   if (!idleBeforeImplement.ok) {
     const errorMsg = `Agent is not idle before implementation: ${idleBeforeImplement.error ?? "busy"}`;
     setStepStatus("implement", "failed", errorMsg);
@@ -364,11 +364,10 @@ export async function runDeliveryWorkflow(
   }
 
   // Poll for implementation progress until agent completes and settles to idle
-  const maxImplementTimeMs = options.maxWaitMs ?? 600_000;
   const implementWait = await checkAgentSettled(
     target,
     client,
-    maxImplementTimeMs,
+    options.maxWaitMs,
     pollIntervalMs,
     async (_status, message) => {
       const files = await getModifiedFiles(cwd, runGit);
@@ -391,7 +390,7 @@ export async function runDeliveryWorkflow(
 
   // --- Step 5: Create PR (only after implement is done and agent is idle) ---
   setStepStatus("pr", "running");
-  const idleBeforePR = await waitForAgentIdle(target, client, 15000, pollIntervalMs);
+  const idleBeforePR = await waitForAgentIdle(target, client, options.maxWaitMs, pollIntervalMs);
   if (!idleBeforePR.ok) {
     const errorMsg = `Agent is not idle before PR creation: ${idleBeforePR.error ?? "busy"}`;
     setStepStatus("pr", "failed", errorMsg);
@@ -409,11 +408,10 @@ export async function runDeliveryWorkflow(
   }
 
   // Poll for PR completion
-  const maxPrTimeMs = 300_000;
   const prWait = await checkAgentSettled(
     target,
     client,
-    maxPrTimeMs,
+    options.maxWaitMs,
     pollIntervalMs,
     (_status, message) => {
       update({ agentMessage: message });
