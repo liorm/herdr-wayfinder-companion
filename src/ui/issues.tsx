@@ -4,6 +4,10 @@ import {
   type Issue,
   type IssueState,
 } from "../github/issues.ts";
+import {
+  getCachedIssues,
+  saveCachedIssues,
+} from "../github/cache.ts";
 import { formatPlainIssues } from "./render.ts";
 import { readRuntime, type PluginRuntime } from "../runtime.ts";
 import { resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
@@ -29,6 +33,9 @@ export async function refreshBoardState(
     loadIssues(cwd, currentState),
     runtime ? fetchSibling(runtime).catch(() => undefined) : Promise.resolve(undefined),
   ]);
+  if (loaded.ok) {
+    saveCachedIssues(cwd, currentState, loaded.repo, loaded.issues, runtime?.stateDir);
+  }
   return { loaded, sibling };
 }
 
@@ -50,7 +57,23 @@ export async function runIssuePane(
 
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       const sibling = await fetchSibling(runtime).catch(() => undefined);
-      return await printIssues(cwd, sibling);
+      return await printIssues(cwd, sibling, runtime);
+    }
+
+    const cached = getCachedIssues(cwd, "open", runtime.stateDir);
+    if (cached) {
+      const sibling = await fetchSibling(runtime).catch(() => undefined);
+      return await startInkApp({
+        cwd,
+        initialRepo: cached.repo,
+        initialState: "open",
+        initialIssues: cached.issues,
+        initialSibling: sibling,
+        runtime,
+        refreshIntervalMs: options?.refreshIntervalMs,
+        fetchSibling,
+        initialRefresh: true,
+      });
     }
 
     const [loaded, sibling] = await Promise.all([
@@ -61,6 +84,8 @@ export async function runIssuePane(
     if (!loaded.ok) {
       return await renderMessage("Wayfinder Companion", loaded.message.split("\n"), 1);
     }
+
+    saveCachedIssues(cwd, "open", loaded.repo, loaded.issues, runtime.stateDir);
 
     return await startInkApp({
       cwd,
@@ -77,12 +102,18 @@ export async function runIssuePane(
   }
 }
 
-async function printIssues(cwd: string, sibling?: SiblingAgent): Promise<number> {
+async function printIssues(cwd: string, sibling?: SiblingAgent, runtime?: PluginRuntime): Promise<number> {
   const loaded = await loadIssues(cwd, "open");
   if (!loaded.ok) {
+    const cached = getCachedIssues(cwd, "open", runtime?.stateDir);
+    if (cached) {
+      console.log(formatPlainIssues(cached.repo, "open", cached.issues, sibling));
+      return 0;
+    }
     console.error(loaded.message);
     return 1;
   }
+  saveCachedIssues(cwd, "open", loaded.repo, loaded.issues, runtime?.stateDir);
   console.log(formatPlainIssues(loaded.repo, loaded.state, loaded.issues, sibling));
   return 0;
 }
@@ -122,6 +153,7 @@ async function startInkApp(props: {
   initialState: IssueState;
   initialIssues: Issue[];
   initialSibling?: SiblingAgent;
+  initialRefresh?: boolean;
   runtime?: PluginRuntime;
   refreshIntervalMs?: number;
   fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
@@ -140,6 +172,7 @@ async function startInkApp(props: {
         initialState={props.initialState}
         initialIssues={props.initialIssues}
         initialSibling={props.initialSibling}
+        initialRefresh={props.initialRefresh}
         runtime={props.runtime}
         refreshIntervalMs={props.refreshIntervalMs}
         fetchSibling={props.fetchSibling}

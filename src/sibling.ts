@@ -16,12 +16,16 @@ export function cleanTerminalTitle(title: string | undefined, agent?: string): s
   if (!title) return undefined;
   let cleaned = title.trim();
   if (agent) {
+    if (cleaned.toLowerCase() === agent.toLowerCase()) {
+      return undefined;
+    }
     const suffixRegex = new RegExp(`\\s*[-–—|•·]\\s*${escapeRegex(agent)}$`, "i");
     cleaned = cleaned.replace(suffixRegex, "").trim();
   }
   // Strip braille spinner or symbol prefixes
   cleaned = cleaned.replace(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏•◦■*›❯]\s*/, "").trim();
   if (!cleaned) return undefined;
+  if (agent && cleaned.toLowerCase() === agent.toLowerCase()) return undefined;
   // Ignore bare shell command names
   if (/^(bash|zsh|sh|fish|tcsh|csh)$/i.test(cleaned)) return undefined;
   // Ignore shell prompts like user@host:~/dir
@@ -100,23 +104,7 @@ export async function resolveSiblingAgent(
 ): Promise<SiblingAgent | undefined> {
   const herdr = client ?? createClient(runtime.binPath);
 
-  let candidatePaneId: string | undefined;
-
-  // 1. If runtime.paneId is known (e.g. running inside the board pane), query neighbor to the left
-  if (runtime.paneId) {
-    const neighborCall = await herdr(["pane", "neighbor", "--direction", "left", "--pane", runtime.paneId]);
-    if (neighborCall.ok && neighborCall.json && typeof neighborCall.json === "object") {
-      const res = (neighborCall.json as { result?: { neighbor?: { neighbor_pane_id?: string } } }).result;
-      candidatePaneId = res?.neighbor?.neighbor_pane_id;
-    }
-  }
-
-  // Fallback candidate from context if not set
-  if (!candidatePaneId) {
-    candidatePaneId = runtime.context.paneId ?? (runtime.context.raw.focused_pane_id as string | undefined);
-  }
-
-  // 2. Fetch pane list and agent list to discover or enrich the sibling pane
+  // 1. Fetch pane list and agent list to discover panes and agents
   const [paneListCall, agentListCall] = await Promise.all([
     herdr(["pane", "list"]),
     herdr(["agent", "list"]),
@@ -133,23 +121,64 @@ export async function resolveSiblingAgent(
       : [];
 
   const currentTabId = runtime.tabId ?? runtime.context.tabId;
+  const selfPaneId = runtime.paneId;
 
-  // If candidatePaneId is the pane itself, clear it
-  if (candidatePaneId && runtime.paneId && candidatePaneId === runtime.paneId) {
+  // Filter panes in the current tab, excluding the board pane itself
+  const tabPanes = currentTabId
+    ? panes.filter((p) => p.tab_id === currentTabId && p.pane_id !== selfPaneId)
+    : panes.filter((p) => p.pane_id !== selfPaneId);
+
+  let candidatePaneId: string | undefined;
+  let candidateAgentName: string | undefined;
+
+  // 2. Identify the first agent in the current tab (regardless of pane location)
+  for (const pane of tabPanes) {
+    const matchingAgent = agents.find((a) => a.pane_id && a.pane_id === pane.pane_id);
+    const agentName = pane.agent ?? matchingAgent?.agent;
+    if (agentName || matchingAgent || pane.agent_status) {
+      candidatePaneId = pane.pane_id;
+      candidateAgentName = agentName;
+      break;
+    }
+  }
+
+  // 3. If not found, check agent list for any agent matching the tab
+  if (!candidatePaneId && currentTabId) {
+    const matchingAgent = agents.find((a) => {
+      if (!a.pane_id || a.pane_id === selfPaneId) return false;
+      const pane = panes.find((p) => p.pane_id === a.pane_id);
+      return pane?.tab_id === currentTabId;
+    });
+    if (matchingAgent?.pane_id) {
+      candidatePaneId = matchingAgent.pane_id;
+      candidateAgentName = matchingAgent.agent;
+    }
+  }
+
+  // 4. If still not found, check context for focusedPaneAgent
+  if (!candidatePaneId && runtime.context.focusedPaneAgent) {
+    candidatePaneId = runtime.context.paneId ?? (runtime.context.raw.focused_pane_id as string | undefined);
+    candidateAgentName = runtime.context.focusedPaneAgent;
+  }
+
+  // 5. If still not found, check neighbor to the left (if self pane is known)
+  if (!candidatePaneId && selfPaneId) {
+    const neighborCall = await herdr(["pane", "neighbor", "--direction", "left", "--pane", selfPaneId]);
+    if (neighborCall.ok && neighborCall.json && typeof neighborCall.json === "object") {
+      const res = (neighborCall.json as { result?: { neighbor?: { neighbor_pane_id?: string } } }).result;
+      if (res?.neighbor?.neighbor_pane_id && res.neighbor.neighbor_pane_id !== selfPaneId) {
+        candidatePaneId = res.neighbor.neighbor_pane_id;
+      }
+    }
+  }
+
+  // 6. Fallback to first non-self pane in current tab
+  if (!candidatePaneId && tabPanes.length > 0) {
+    candidatePaneId = tabPanes[0]?.pane_id;
+  }
+
+  if (candidatePaneId && selfPaneId && candidatePaneId === selfPaneId) {
     candidatePaneId = undefined;
-  }
-
-  // If candidatePaneId is still not found, search panes in the same tab, preferring one with an agent
-  if (!candidatePaneId && currentTabId) {
-    const tabPanes = panes.filter((p) => p.tab_id === currentTabId && p.pane_id !== runtime.paneId);
-    const withAgent = tabPanes.find((p) => Boolean(p.agent));
-    candidatePaneId = withAgent?.pane_id ?? tabPanes[0]?.pane_id;
-  }
-
-  // If still not found, look for any agent in the same tab or workspace
-  if (!candidatePaneId && currentTabId) {
-    const matchingAgent = agents.find((a) => a.pane_id && a.pane_id !== runtime.paneId);
-    candidatePaneId = matchingAgent?.pane_id;
   }
 
   let paneObj = panes.find((p) => p.pane_id === candidatePaneId);
@@ -164,6 +193,7 @@ export async function resolveSiblingAgent(
   }
 
   const agentName =
+    candidateAgentName ??
     paneObj?.agent ??
     agentObj?.agent ??
     runtime.context.focusedPaneAgent ??
@@ -189,9 +219,7 @@ export async function resolveSiblingAgent(
   }
   if (!lastMessage) {
     const explicitTitle = paneObj?.title ?? agentObj?.title;
-    if (explicitTitle && explicitTitle.trim().length > 0) {
-      lastMessage = explicitTitle.trim();
-    }
+    lastMessage = cleanTerminalTitle(explicitTitle, agentName);
   }
   if (!lastMessage) {
     const termTitle =
@@ -218,14 +246,18 @@ export async function resolveSiblingAgent(
       (runtime.context.raw.last_message as string | undefined);
   }
 
-  if (!candidatePaneId && !agentName && !status && !lastMessage) {
-    return undefined;
-  }
-
   return {
     paneId: candidatePaneId,
     agent: agentName,
     status,
     lastMessage,
   };
+}
+
+export async function findAgentPaneInCurrentTab(
+  runtime: PluginRuntime,
+  client?: (args: string[]) => Promise<HerdrCall>,
+): Promise<string | undefined> {
+  const sibling = await resolveSiblingAgent(runtime, client);
+  return sibling?.paneId;
 }

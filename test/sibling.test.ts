@@ -208,6 +208,73 @@ describe("resolveSiblingAgent", () => {
       lastMessage: undefined,
     });
   });
+
+  test("identifies the first agent in the current tab regardless of pane position", async () => {
+    const multiPaneRuntime: PluginRuntime = {
+      pluginId: "wayfinder.companion",
+      binPath: "herdr",
+      paneId: "w1:companion_pane",
+      tabId: "w1:t1",
+      context: {
+        raw: {},
+      },
+    };
+
+    const mockHerdr = async (args: string[]): Promise<any> => {
+      const cmd = args.join(" ");
+      if (cmd.includes("pane list")) {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: {
+            result: {
+              panes: [
+                { pane_id: "w1:p_shell", tab_id: "w1:t1" }, // plain shell
+                {
+                  pane_id: "w1:p_agent1",
+                  tab_id: "w1:t1",
+                  agent: "gemini",
+                  agent_status: "working",
+                  title: "Fixing edge cases",
+                },
+                {
+                  pane_id: "w1:p_agent2",
+                  tab_id: "w1:t1",
+                  agent: "claude",
+                  agent_status: "idle",
+                },
+              ],
+            },
+          },
+        };
+      }
+      if (cmd.includes("agent list")) {
+        return {
+          ok: true,
+          status: 0,
+          stdout: "",
+          stderr: "",
+          json: {
+            result: {
+              agents: [
+                { pane_id: "w1:p_agent1", agent: "gemini" },
+                { pane_id: "w1:p_agent2", agent: "claude" },
+              ],
+            },
+          },
+        };
+      }
+      return { ok: false, status: 1, stdout: "", stderr: "", json: null };
+    };
+
+    const sibling = await resolveSiblingAgent(multiPaneRuntime, mockHerdr);
+    expect(sibling?.paneId).toBe("w1:p_agent1");
+    expect(sibling?.agent).toBe("gemini");
+    expect(sibling?.status).toBe("working");
+    expect(sibling?.lastMessage).toBe("Fixing edge cases");
+  });
 });
 
 describe("collectStatus", () => {

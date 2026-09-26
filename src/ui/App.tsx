@@ -6,6 +6,7 @@ import {
   type Issue,
   type IssueState,
 } from "../github/issues.ts";
+import { getCachedIssues } from "../github/cache.ts";
 import type { PluginRuntime } from "../runtime.ts";
 import { resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
 import { boardRows, lineOfSelection, selectableIssues } from "../wayfinder/board.ts";
@@ -22,6 +23,7 @@ export interface AppProps {
   initialState?: IssueState;
   initialIssues?: Issue[];
   initialSibling?: SiblingAgent;
+  initialRefresh?: boolean;
   initialMessage?: {
     title: string;
     lines: string[];
@@ -38,6 +40,7 @@ export const App: React.FC<AppProps> = ({
   initialState = "open",
   initialIssues = [],
   initialSibling,
+  initialRefresh = false,
   initialMessage,
   runtime,
   refreshIntervalMs = 5000,
@@ -114,6 +117,40 @@ export const App: React.FC<AppProps> = ({
       setDetailLines(formatMarkdown(detailRawBody, dimensions.columns));
     }
   }, [dimensions.columns, mode, detailIssue, detailRawBody]);
+
+  // Immediate initial background refresh if requested (e.g. fast startup from cache)
+  useEffect(() => {
+    if (!initialRefresh || !cwd) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { loaded, sibling: newSibling } = await refreshBoardState(
+          cwd,
+          stateRef.current,
+          runtime,
+          fetchSibling,
+        );
+        if (cancelled) return;
+        if (newSibling !== undefined) {
+          setSibling(newSibling);
+        }
+        if (loaded.ok) {
+          const prevNumber = issuesRef.current[selectedRef.current]?.number;
+          const currentSel = selectedRef.current;
+          const nextArranged = selectableIssues(boardRows(loaded.issues));
+          const newSel = preserveSelection(nextArranged, currentSel, prevNumber);
+          setRepo(loaded.repo);
+          setIssues(nextArranged);
+          setSelected(newSel);
+        }
+      } catch {
+        // ignore background errors
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initialRefresh, cwd, runtime, fetchSibling]);
 
   // Background refresh
   useEffect(() => {
@@ -230,6 +267,15 @@ export const App: React.FC<AppProps> = ({
       if (input === "f" || input === "F") {
         if (!cwd) return;
         const next = nextIssueState(state);
+        const cached = getCachedIssues(cwd, next, runtime?.stateDir);
+        if (cached) {
+          const nextArranged = selectableIssues(boardRows(cached.issues));
+          setRepo(cached.repo);
+          setState(next);
+          setIssues(nextArranged);
+          setSelected(0);
+          setScroll(0);
+        }
         setNotice(`Loading ${next} issues…`);
         const { loaded, sibling: newSibling } = await refreshBoardState(
           cwd,
@@ -247,7 +293,11 @@ export const App: React.FC<AppProps> = ({
           setScroll(0);
           setNotice(undefined);
         } else {
-          setNotice(loaded.message);
+          if (!cached) {
+            setNotice(loaded.message);
+          } else {
+            setNotice(undefined);
+          }
         }
         return;
       }
