@@ -225,13 +225,7 @@ function dialogLines(model: DialogModel, columns: number, rows: number): string[
 }
 
 
-/**
- * Formats a terminal hyperlink using standard OSC 8 escape sequence.
- */
-export function terminalLink(text: string, url?: string): string {
-  if (!url) return text;
-  return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
-}
+export { terminalLink } from "./link.ts";
 
 function rowText(row: BoardRow, width: number): string {
   if (row.type === "label") return clip(row.text, width);

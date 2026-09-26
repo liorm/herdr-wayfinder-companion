@@ -1,4 +1,5 @@
 import type { Issue } from "../github/issues.ts";
+import { terminalLink } from "../ui/link.ts";
 
 /** Wayfinder ticket kinds from pass-the-ink `scripts/wayfinder.js` and `docs/agents/issue-tracker.md`. */
 export type TicketKind = "map" | "grilling" | "research" | "prototype" | "task" | "delivery" | "other";
@@ -237,8 +238,7 @@ function badgesFor(
     if (extras.length > 0) badges.push(extras.join(", "));
   }
   if (pr) {
-    const prText = `PR #${pr.number}`;
-    badges.push(pr.url ? `\x1b]8;;${pr.url}\x07${prText}\x1b]8;;\x07` : prText);
+    badges.push(terminalLink(`PR #${pr.number}`, pr.url));
   } else if (branch) {
     badges.push(branch);
   }

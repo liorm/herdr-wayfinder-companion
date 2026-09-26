@@ -148,7 +148,7 @@ describe("boardRows", () => {
       issue: blocked,
       depth: 1,
       kind: "delivery",
-      badges: ["delivery", "\x1b]8;;https://github.com/org/repo/pull/45\x07PR #45\x1b]8;;\x07", "blocked"],
+      badges: ["delivery", "\x1b]8;;https://github.com/org/repo/pull/45\x07\x1b[4mPR #45\x1b[24m\x1b]8;;\x07", "blocked"],
       tone: "blocked",
     });
 

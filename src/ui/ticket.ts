@@ -2,6 +2,7 @@ import stringWidth from "string-width";
 import type { Issue } from "../github/issues.ts";
 import { boardRows, type BoardOptions, type RowTone } from "../wayfinder/board.ts";
 import { formatMarkdown } from "./markdown.ts";
+import { terminalLink } from "./link.ts";
 
 /** Ticket view footer. `q` closes the whole plugin, so it is not a ticket shortcut. */
 export const TICKET_FOOTER = "j/k scroll   esc back   o open   w work";
@@ -96,7 +97,7 @@ export function formatTicketView(
   lines.push(
     ...renderSegments(
       [
-        { text: issue.url ? `\x1b]8;;${issue.url}\x07#${issue.number}\x1b]8;;\x07` : `#${issue.number}`, codes: "1" },
+        { text: terminalLink(`#${issue.number}`, issue.url), codes: "1" },
         { text: closed ? "Closed" : "Open", codes: closed ? "2" : (TONE_SGR[tone] ?? "32") },
         ...statusBadges(badges, issue).map((badge) => ({ text: badge, codes: badgeCode(badge, tone) })),
       ],
@@ -114,8 +115,8 @@ export function formatTicketView(
 
   const pr = options?.prs ? (options.prs instanceof Map ? options.prs.get(issue.number) : options.prs[issue.number]) : undefined;
   if (pr) {
-    const prLink = pr.url ? `\x1b]8;;${pr.url}\x07PR #${pr.number}\x1b]8;;\x07` : `PR #${pr.number}`;
-    const urlLink = pr.url ? `\x1b]8;;${pr.url}\x07${pr.url}\x1b]8;;\x07` : pr.url;
+    const prLink = terminalLink(`PR #${pr.number}`, pr.url);
+    const urlLink = terminalLink(pr.url, pr.url);
     const prLine = `Pull Request: ${prLink} • ${urlLink}${pr.state ? ` [${pr.state}]` : ""}`;
     lines.push(style(prLine, "35"));
   }
