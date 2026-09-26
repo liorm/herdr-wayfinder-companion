@@ -1,6 +1,6 @@
 import { PLUGIN_ID, readRuntime, repoDirectory, type PluginRuntime } from "./runtime.ts";
 import { createClient, type HerdrCall } from "./herdr.ts";
-import { runIssuePane } from "./ui/issues.ts";
+import { runIssuePane } from "./ui/issues.tsx";
 import { resolveSiblingAgent, type SiblingAgent } from "./sibling.ts";
 
 export interface StatusReport {

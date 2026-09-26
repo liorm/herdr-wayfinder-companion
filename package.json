@@ -11,9 +11,17 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
+    "@types/marked-terminal": "^6.1.1",
+    "@types/react": "^19.3.0",
     "typescript": "^5.9.3"
   },
   "engines": {
     "bun": ">=1.3.0"
+  },
+  "dependencies": {
+    "ink": "^7.1.1",
+    "marked": "^18.0.14",
+    "marked-terminal": "^7.3.0",
+    "react": "^19.3.0"
   }
 }

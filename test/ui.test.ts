@@ -71,6 +71,30 @@ describe("renderPane", () => {
     expect(frame).toContain("This is the fallback body from issue list.");
     expect(frame).not.toContain("This issue has no body.");
   });
+
+  test("detail view renders markdown and word-wraps long content", () => {
+    const list: ListModel = {
+      kind: "list",
+      repo: "acme/widgets",
+      state: "open",
+      issues: [issue],
+      selected: 0,
+      scroll: 0,
+    };
+    const frame = renderPane(
+      {
+        kind: "detail",
+        issue,
+        body: "# Bug Summary\n\nThis is a rather long sentence that needs to wrap cleanly within thirty columns without overflowing.",
+        scroll: 0,
+        list,
+      },
+      30,
+      10,
+    );
+    expect(frame).toContain("Bug Summary");
+    expect(frame).toContain("rather long");
+  });
 });
 
 describe("formatPlainIssues", () => {

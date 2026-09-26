@@ -238,7 +238,7 @@ describe("collectStatus", () => {
 
 describe("refreshBoardState", () => {
   test("refreshes tickets and sibling agent concurrently", async () => {
-    const { refreshBoardState } = await import("../src/ui/issues.ts");
+    const { refreshBoardState } = await import("../src/ui/issues.tsx");
     const mockRuntime: PluginRuntime = {
       pluginId: "wayfinder.companion",
       binPath: "herdr",

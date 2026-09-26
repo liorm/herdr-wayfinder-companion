@@ -1,0 +1,344 @@
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useApp, useInput, useStdout } from "ink";
+import {
+  loadIssueView,
+  nextIssueState,
+  type Issue,
+  type IssueState,
+} from "../github/issues.ts";
+import type { PluginRuntime } from "../runtime.ts";
+import { resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
+import { boardRows, lineOfSelection, selectableIssues } from "../wayfinder/board.ts";
+import { preserveSelection, reveal } from "./render.ts";
+import { formatMarkdown } from "./markdown.ts";
+import { ListView } from "./components/ListView.tsx";
+import { DetailView } from "./components/DetailView.tsx";
+import { MessageView } from "./components/MessageView.tsx";
+import { refreshBoardState } from "./issues.tsx";
+
+export interface AppProps {
+  cwd?: string;
+  initialRepo?: string;
+  initialState?: IssueState;
+  initialIssues?: Issue[];
+  initialSibling?: SiblingAgent;
+  initialMessage?: {
+    title: string;
+    lines: string[];
+    footer?: string;
+  };
+  runtime?: PluginRuntime;
+  refreshIntervalMs?: number;
+  fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
+}
+
+export const App: React.FC<AppProps> = ({
+  cwd,
+  initialRepo = "",
+  initialState = "open",
+  initialIssues = [],
+  initialSibling,
+  initialMessage,
+  runtime,
+  refreshIntervalMs = 5000,
+  fetchSibling = resolveSiblingAgent,
+}) => {
+  const { exit } = useApp();
+  const { stdout } = useStdout();
+
+  const [dimensions, setDimensions] = useState({
+    columns: stdout?.columns && stdout.columns > 0 ? stdout.columns : process.stdout.columns || 80,
+    rows: stdout?.rows && stdout.rows > 0 ? stdout.rows : process.stdout.rows || 24,
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setDimensions({
+        columns: stdout?.columns && stdout.columns > 0 ? stdout.columns : process.stdout.columns || 80,
+        rows: stdout?.rows && stdout.rows > 0 ? stdout.rows : process.stdout.rows || 24,
+      });
+    };
+    stdout?.on("resize", handleResize);
+    process.stdout.on("resize", handleResize);
+    return () => {
+      stdout?.off("resize", handleResize);
+      process.stdout.off("resize", handleResize);
+    };
+  }, [stdout]);
+
+  const initialArranged = selectableIssues(boardRows(initialIssues));
+  const [mode, setMode] = useState<"list" | "detail" | "message">(
+    initialMessage ? "message" : "list",
+  );
+  const [repo, setRepo] = useState(initialRepo);
+  const [state, setState] = useState<IssueState>(initialState);
+  const [issues, setIssues] = useState<Issue[]>(initialArranged);
+  const [selected, setSelected] = useState(0);
+  const [scroll, setScroll] = useState(0);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
+  const [sibling, setSibling] = useState<SiblingAgent | undefined>(initialSibling);
+
+  // Detail view state
+  const [detailIssue, setDetailIssue] = useState<Issue | null>(null);
+  const [detailRawBody, setDetailRawBody] = useState<string>("");
+  const [detailLines, setDetailLines] = useState<string[]>([]);
+  const [detailScroll, setDetailScroll] = useState<number>(0);
+
+  // Message view state
+  const [message] = useState<{
+    title: string;
+    lines: string[];
+    footer: string;
+  } | null>(
+    initialMessage
+      ? {
+          title: initialMessage.title,
+          lines: initialMessage.lines,
+          footer: initialMessage.footer ?? "q close",
+        }
+      : null,
+  );
+
+  // Refs for background refresh
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const issuesRef = useRef(issues);
+  issuesRef.current = issues;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const refreshingRef = useRef(false);
+
+  // Re-wrap markdown when columns change in detail view
+  useEffect(() => {
+    if (mode === "detail" && detailIssue) {
+      setDetailLines(formatMarkdown(detailRawBody, dimensions.columns));
+    }
+  }, [dimensions.columns, mode, detailIssue, detailRawBody]);
+
+  // Background refresh
+  useEffect(() => {
+    if (!cwd || refreshIntervalMs <= 0) return;
+
+    const interval = setInterval(async () => {
+      if (refreshingRef.current) return;
+      refreshingRef.current = true;
+      try {
+        const currentState = stateRef.current;
+        const { loaded, sibling: newSibling } = await refreshBoardState(
+          cwd,
+          currentState,
+          runtime,
+          fetchSibling,
+        );
+        if (newSibling !== undefined) {
+          setSibling(newSibling);
+        }
+        if (loaded.ok) {
+          const prevNumber = issuesRef.current[selectedRef.current]?.number;
+          const currentSel = selectedRef.current;
+          const nextArranged = selectableIssues(boardRows(loaded.issues));
+          const newSel = preserveSelection(nextArranged, currentSel, prevNumber);
+          setRepo(loaded.repo);
+          setIssues(nextArranged);
+          setSelected(newSel);
+        }
+      } catch {
+        // ignore background errors
+      } finally {
+        refreshingRef.current = false;
+      }
+    }, refreshIntervalMs);
+
+    return () => clearInterval(interval);
+  }, [cwd, refreshIntervalMs, runtime, fetchSibling]);
+
+  const windowSize = Math.max(dimensions.rows - 3, 1);
+
+  const moveSelection = useCallback(
+    (delta: number) => {
+      if (issues.length === 0) return;
+      const nextSelected = Math.min(issues.length - 1, Math.max(0, selected + delta));
+      const laid = boardRows(issues);
+      const line = lineOfSelection(laid, nextSelected);
+      setSelected(nextSelected);
+      setScroll(reveal(line, scroll, windowSize));
+      setNotice(undefined);
+    },
+    [issues, selected, scroll, windowSize],
+  );
+
+  useInput(async (input, key) => {
+    if (key.ctrl && input === "c") {
+      exit();
+      return;
+    }
+    if (input === "q" || input === "Q") {
+      exit();
+      return;
+    }
+
+    if (mode === "message") {
+      if (key.escape) {
+        exit();
+      }
+      return;
+    }
+
+    if (mode === "detail") {
+      if (key.escape) {
+        setMode("list");
+        return;
+      }
+      if (key.upArrow || input === "k") {
+        setDetailScroll((prev) => Math.max(0, prev - 1));
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        setDetailScroll((prev) => {
+          const max = Math.max(0, detailLines.length - windowSize);
+          return Math.min(max, prev + 1);
+        });
+        return;
+      }
+      if (key.pageDown || input === " ") {
+        setDetailScroll((prev) => {
+          const max = Math.max(0, detailLines.length - windowSize);
+          return Math.min(max, prev + windowSize);
+        });
+        return;
+      }
+      if (key.pageUp || input === "b") {
+        setDetailScroll((prev) => Math.max(0, prev - windowSize));
+        return;
+      }
+      return;
+    }
+
+    if (mode === "list") {
+      if (key.escape) {
+        exit();
+        return;
+      }
+      if (key.upArrow || input === "k") {
+        moveSelection(-1);
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        moveSelection(1);
+        return;
+      }
+      if (input === "f" || input === "F") {
+        if (!cwd) return;
+        const next = nextIssueState(state);
+        setNotice(`Loading ${next} issues…`);
+        const { loaded, sibling: newSibling } = await refreshBoardState(
+          cwd,
+          next,
+          runtime,
+          fetchSibling,
+        );
+        if (newSibling !== undefined) setSibling(newSibling);
+        if (loaded.ok) {
+          const nextArranged = selectableIssues(boardRows(loaded.issues));
+          setRepo(loaded.repo);
+          setState(loaded.state);
+          setIssues(nextArranged);
+          setSelected(0);
+          setScroll(0);
+          setNotice(undefined);
+        } else {
+          setNotice(loaded.message);
+        }
+        return;
+      }
+      if (input === "r" || input === "R") {
+        if (!cwd) return;
+        const previous = issues[selected]?.number;
+        const currentSel = selected;
+        setNotice("Refreshing…");
+        const { loaded, sibling: newSibling } = await refreshBoardState(
+          cwd,
+          state,
+          runtime,
+          fetchSibling,
+        );
+        if (newSibling !== undefined) setSibling(newSibling);
+        if (loaded.ok) {
+          const nextArranged = selectableIssues(boardRows(loaded.issues));
+          const newSel = preserveSelection(nextArranged, currentSel, previous);
+          const laid = boardRows(nextArranged);
+          const line = lineOfSelection(laid, newSel);
+          setRepo(loaded.repo);
+          setIssues(nextArranged);
+          setSelected(newSel);
+          setScroll(reveal(line, scroll, windowSize));
+          setNotice(undefined);
+        } else {
+          setNotice(loaded.message);
+        }
+        return;
+      }
+      if (key.return) {
+        if (!cwd) return;
+        const currentIssue = issues[selected];
+        if (!currentIssue) return;
+        setNotice(`Loading #${currentIssue.number}…`);
+        const viewed = await loadIssueView(cwd, currentIssue.number);
+        let body = viewed.ok ? viewed.body : "";
+        if (!body.trim() && currentIssue.body) {
+          body = currentIssue.body;
+        }
+        if (viewed.ok || body.length > 0) {
+          const formatted = formatMarkdown(body, dimensions.columns);
+          setDetailIssue(currentIssue);
+          setDetailRawBody(body);
+          setDetailLines(formatted);
+          setDetailScroll(0);
+          setNotice(undefined);
+          setMode("detail");
+        } else {
+          setNotice(viewed.message);
+        }
+        return;
+      }
+    }
+  });
+
+  if (mode === "message" && message) {
+    return (
+      <MessageView
+        title={message.title}
+        lines={message.lines}
+        footer={message.footer}
+        columns={dimensions.columns}
+        rows={dimensions.rows}
+      />
+    );
+  }
+
+  if (mode === "detail" && detailIssue) {
+    return (
+      <DetailView
+        issue={detailIssue}
+        lines={detailLines}
+        scroll={detailScroll}
+        columns={dimensions.columns}
+        rows={dimensions.rows}
+      />
+    );
+  }
+
+  return (
+    <ListView
+      repo={repo}
+      state={state}
+      issues={issues}
+      selected={selected}
+      scroll={scroll}
+      notice={notice}
+      sibling={sibling}
+      columns={dimensions.columns}
+      rows={dimensions.rows}
+    />
+  );
+};

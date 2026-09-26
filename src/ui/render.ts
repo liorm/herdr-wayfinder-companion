@@ -1,6 +1,7 @@
 import { ISSUE_LIMIT, type Issue, type IssueState } from "../github/issues.ts";
 import { boardRows, lineOfSelection, selectableIssues, type BoardRow, type RowTone } from "../wayfinder/board.ts";
 import type { SiblingAgent } from "../sibling.ts";
+import { formatMarkdown } from "./markdown.ts";
 
 export interface ListModel {
   kind: "list";
@@ -153,7 +154,7 @@ function listLines(model: ListModel, columns: number, rows: number): string[] {
 function detailLines(model: DetailModel, columns: number, rows: number): string[] {
   const windowSize = Math.max(rows - 3, 1);
   const text = model.body.trim().length > 0 ? model.body : (model.issue.body?.trim() ?? "");
-  const body = text.length > 0 ? text.split("\n") : ["This issue has no body."];
+  const body = formatMarkdown(text, columns);
   const scroll = moveScroll(model.scroll, 0, body.length, windowSize);
   const lines = [
     pad(clip(`#${model.issue.number}  ${model.issue.title}`, columns), columns),
