@@ -7,9 +7,11 @@ import {
   type IssueState,
 } from "../github/issues.ts";
 import { getCachedIssues } from "../github/cache.ts";
+import { createClient, type HerdrCall } from "../herdr.ts";
 import type { PluginRuntime } from "../runtime.ts";
 import { resolveSiblingAgent, type SiblingAgent } from "../sibling.ts";
-import { boardRows, lineOfSelection, selectableIssues } from "../wayfinder/board.ts";
+import { boardRows, isIssueBlocked, lineOfSelection, selectableIssues } from "../wayfinder/board.ts";
+import { dispatchWork } from "../wayfinder/work.ts";
 import { preserveSelection, reveal } from "./render.ts";
 import { formatTicketView } from "./ticket.ts";
 import { ListView } from "./components/ListView.tsx";
@@ -32,6 +34,7 @@ export interface AppProps {
   runtime?: PluginRuntime;
   refreshIntervalMs?: number;
   fetchSibling?: (runtime: PluginRuntime) => Promise<SiblingAgent | undefined>;
+  herdrClient?: (args: string[]) => Promise<HerdrCall>;
 }
 
 export const App: React.FC<AppProps> = ({
@@ -45,6 +48,7 @@ export const App: React.FC<AppProps> = ({
   runtime,
   refreshIntervalMs = 5000,
   fetchSibling = resolveSiblingAgent,
+  herdrClient,
 }) => {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -252,6 +256,23 @@ export const App: React.FC<AppProps> = ({
         setDetailScroll((prev) => Math.max(0, prev - detailWindow));
         return;
       }
+      if (input === "w" || input === "W") {
+        if (!detailIssue) return;
+        if (isIssueBlocked(detailIssue, issues)) {
+          setNotice(`Ticket #${detailIssue.number} is blocked.`);
+          return;
+        }
+        if (!sibling || sibling.status !== "idle") {
+          const statusText = sibling?.status ? ` (${sibling.status})` : "";
+          setNotice(`Agent is not idle${statusText}.`);
+          return;
+        }
+        setNotice(`Starting work on #${detailIssue.number}…`);
+        const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
+        const result = await dispatchWork(detailIssue, sibling, client);
+        setNotice(result.message);
+        return;
+      }
       return;
     }
 
@@ -266,6 +287,24 @@ export const App: React.FC<AppProps> = ({
       }
       if (key.downArrow || input === "j") {
         moveSelection(1);
+        return;
+      }
+      if (input === "w" || input === "W") {
+        const currentIssue = issues[selected];
+        if (!currentIssue) return;
+        if (isIssueBlocked(currentIssue, issues)) {
+          setNotice(`Ticket #${currentIssue.number} is blocked.`);
+          return;
+        }
+        if (!sibling || sibling.status !== "idle") {
+          const statusText = sibling?.status ? ` (${sibling.status})` : "";
+          setNotice(`Agent is not idle${statusText}.`);
+          return;
+        }
+        setNotice(`Starting work on #${currentIssue.number}…`);
+        const client = herdrClient ?? createClient(runtime?.binPath ?? "herdr");
+        const result = await dispatchWork(currentIssue, sibling, client);
+        setNotice(result.message);
         return;
       }
       if (input === "f" || input === "F") {

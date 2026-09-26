@@ -149,7 +149,7 @@ function listLines(model: ListModel, columns: number, rows: number): string[] {
     }
   }
   while (lines.length < rows - 1) lines.push(blank(columns));
-  lines.push(pad(clip("j/k move   enter view   f filter   r refresh   q close", columns), columns));
+  lines.push(pad(clip("j/k move   enter view   w work   f filter   r refresh   q close", columns), columns));
   return lines.slice(0, rows);
 }
 

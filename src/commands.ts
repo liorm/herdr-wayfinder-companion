@@ -23,8 +23,11 @@ export interface StatusReport {
   };
 }
 
-export async function collectStatus(runtime: PluginRuntime = readRuntime()): Promise<StatusReport> {
-  const herdr = createClient(runtime.binPath);
+export async function collectStatus(
+  runtime: PluginRuntime = readRuntime(),
+  client?: (args: string[]) => Promise<HerdrCall>,
+): Promise<StatusReport> {
+  const herdr = client ?? createClient(runtime.binPath);
   const [workspaceList, agentList, sibling] = await Promise.all([
     herdr(["workspace", "list"]),
     herdr(["agent", "list"]),

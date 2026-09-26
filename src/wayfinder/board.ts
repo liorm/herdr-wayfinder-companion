@@ -135,10 +135,15 @@ function sortChildren(issues: Issue[]): Issue[] {
   return [...issues].sort((a, b) => a.number - b.number);
 }
 
+export function isIssueBlocked(issue: Issue, all: Issue[]): boolean {
+  if (issue.closed) return false;
+  const openNumbers = new Set(all.filter((item) => !item.closed).map((item) => item.number));
+  return blockerNumbers(issue.body).some((number) => openNumbers.has(number));
+}
+
 function issueRow(issue: Issue, depth: number, all: Issue[]): BoardRow {
   const kind = ticketKind(issue.labels);
-  const openNumbers = new Set(all.filter((item) => !item.closed).map((item) => item.number));
-  const blocked = !issue.closed && blockerNumbers(issue.body).some((number) => openNumbers.has(number));
+  const blocked = isIssueBlocked(issue, all);
   const badges = badgesFor(issue, kind, blocked);
   return { type: "issue", issue, depth, kind, badges, tone: rowTone(issue, kind, blocked) };
 }

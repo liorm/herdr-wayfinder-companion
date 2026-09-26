@@ -281,7 +281,7 @@ describe("collectStatus", () => {
   test("includes sibling info in status report", async () => {
     const runtime: PluginRuntime = {
       pluginId: "wayfinder.companion",
-      binPath: "herdr",
+      binPath: "nonexistent-herdr-bin",
       context: {
         raw: {
           focused_pane_id: "w1:p1",

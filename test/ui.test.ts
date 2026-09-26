@@ -198,5 +198,6 @@ describe("keyFromPress", () => {
     expect(keyFromPress("\x03", { name: "c", ctrl: true })).toEqual({ kind: "ctrl-c" });
     expect(keyFromPress("q", { name: "q" })).toEqual({ kind: "char", value: "q" });
     expect(keyFromPress("j", { name: "j" })).toEqual({ kind: "char", value: "j" });
+    expect(keyFromPress("w", { name: "w" })).toEqual({ kind: "char", value: "w" });
   });
 });
