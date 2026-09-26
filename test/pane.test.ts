@@ -8,10 +8,10 @@ function testEnv(context: Record<string, unknown>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: `${new URL("./fixtures", import.meta.url).pathname}:${process.env.PATH ?? ""}`,
-    HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify(context),
+    HERDR_BIN_PATH: "nonexistent-herdr-bin",
+    HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ focused_pane_agent: "grok", ...context }),
   };
   delete env.HERDR_PANE_ID;
-  delete env.HERDR_BIN_PATH;
   delete env.HERDR_PLUGIN_ENTRYPOINT_ID;
   delete env.HERDR_WORKSPACE_ID;
   delete env.HERDR_TAB_ID;
@@ -102,4 +102,25 @@ test("ui prints the issue list when it is not attached to a terminal", async () 
   expect(stderr).toBe("");
   expect(stdout).toContain("acme/widgets  (open)");
   expect(stdout).toContain("#7  Fix the gate  bug");
+});
+
+test("ui reports error and exits when no sibling agent is found on startup", async () => {
+  chmodSync(fixture, 0o755);
+  const proc = Bun.spawn([process.execPath, "src/main.ts", "ui"], {
+    cwd: root,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    env: {
+      ...testEnv({ workspace_cwd: root }),
+      HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify({ workspace_cwd: root }),
+    },
+  });
+  const [, stderr, status] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  expect(status).toBe(1);
+  expect(stderr).toContain("No sibling agent found in the current tab");
 });

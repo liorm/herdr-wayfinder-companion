@@ -71,7 +71,7 @@ export function renderPane(model: PaneModel, columns: number, rows: number): str
 
 export function formatAgentDetails(sibling: SiblingAgent): string {
   const agentName = sibling.agent;
-  const status = sibling.status;
+  const status = sibling.status && sibling.status !== "unknown" ? sibling.status : undefined;
   const message = sibling.lastMessage;
 
   let label = "";

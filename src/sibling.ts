@@ -8,6 +8,13 @@ export interface SiblingAgent {
   lastMessage?: string;
 }
 
+export function hasSiblingAgent(sibling: SiblingAgent | undefined): boolean {
+  if (!sibling) return false;
+  const hasAgentName = Boolean(sibling.agent && sibling.agent.trim().length > 0);
+  const hasValidStatus = Boolean(sibling.status && sibling.status !== "unknown");
+  return hasAgentName || hasValidStatus;
+}
+
 export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -135,9 +142,10 @@ export async function resolveSiblingAgent(
   for (const pane of tabPanes) {
     const matchingAgent = agents.find((a) => a.pane_id && a.pane_id === pane.pane_id);
     const agentName = pane.agent ?? matchingAgent?.agent;
-    if (agentName || matchingAgent || pane.agent_status) {
+    const hasValidStatus = pane.agent_status && pane.agent_status !== "unknown";
+    if (agentName || matchingAgent || hasValidStatus) {
       candidatePaneId = pane.pane_id;
-      candidateAgentName = agentName;
+      candidateAgentName = agentName ?? matchingAgent?.agent;
       break;
     }
   }
@@ -161,24 +169,31 @@ export async function resolveSiblingAgent(
     candidateAgentName = runtime.context.focusedPaneAgent;
   }
 
-  // 5. If still not found, check neighbor to the left (if self pane is known)
+  // 5. If still not found, check neighbor to the left (only if it has an agent)
   if (!candidatePaneId && selfPaneId) {
     const neighborCall = await herdr(["pane", "neighbor", "--direction", "left", "--pane", selfPaneId]);
     if (neighborCall.ok && neighborCall.json && typeof neighborCall.json === "object") {
       const res = (neighborCall.json as { result?: { neighbor?: { neighbor_pane_id?: string } } }).result;
-      if (res?.neighbor?.neighbor_pane_id && res.neighbor.neighbor_pane_id !== selfPaneId) {
-        candidatePaneId = res.neighbor.neighbor_pane_id;
+      const neighborId = res?.neighbor?.neighbor_pane_id;
+      if (neighborId && neighborId !== selfPaneId) {
+        const neighborPane = panes.find((p) => p.pane_id === neighborId);
+        const neighborAgent = agents.find((a) => a.pane_id === neighborId);
+        const agentName = neighborPane?.agent ?? neighborAgent?.agent;
+        const hasValidStatus = neighborPane?.agent_status && neighborPane?.agent_status !== "unknown";
+        if (agentName || neighborAgent || hasValidStatus) {
+          candidatePaneId = neighborId;
+          candidateAgentName = agentName;
+        }
       }
     }
   }
 
-  // 6. Fallback to first non-self pane in current tab
-  if (!candidatePaneId && tabPanes.length > 0) {
-    candidatePaneId = tabPanes[0]?.pane_id;
-  }
-
   if (candidatePaneId && selfPaneId && candidatePaneId === selfPaneId) {
     candidatePaneId = undefined;
+  }
+
+  if (!candidatePaneId && !candidateAgentName && !runtime.context.focusedPaneAgent && !runtime.context.raw.agent) {
+    return undefined;
   }
 
   let paneObj = panes.find((p) => p.pane_id === candidatePaneId);
@@ -204,6 +219,10 @@ export async function resolveSiblingAgent(
     agentObj?.agent_status ??
     runtime.context.focusedPaneStatus ??
     (runtime.context.raw.agent_status as string | undefined);
+
+  if (!agentName && (!status || status === "unknown")) {
+    return undefined;
+  }
 
   // Resolve last message
   const stateLabels = paneObj?.state_labels ?? agentObj?.state_labels;
