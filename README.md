@@ -59,7 +59,7 @@ Bind `open` in the Herdr config:
 
 ```toml
 [[keys.command]]
-key = "prefix+g"
+key = "prefix+p"
 type = "plugin_action"
 command = "wayfinder.companion.open"
 description = "open wayfinder companion"

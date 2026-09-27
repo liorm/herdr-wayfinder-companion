@@ -98,7 +98,7 @@ Keybindings are user config, not manifest fields:
 
 ```toml
 [[keys.command]]
-key = "prefix+g"
+key = "prefix+p"
 type = "plugin_action"
 command = "wayfinder.companion.open"
 description = "open wayfinder companion"
