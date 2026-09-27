@@ -26,10 +26,8 @@ herdr plugin action invoke wayfinder.companion.open
 
 ## Install
 
-From GitHub, once this repository is public:
-
 ```sh
-herdr plugin install <owner>/herdr-wayfinder-companion
+herdr plugin install liorm/herdr-wayfinder-companion
 ```
 
 Install verifies required binaries (`gh`, `bun`), runs `bun install --frozen-lockfile`, compiles the standalone executable to `dist/wayfinder-companion`, and registers the plugin. Add the GitHub topic `herdr-plugin` to list it in the [marketplace](https://herdr.dev/plugins/).
