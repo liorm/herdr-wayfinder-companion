@@ -33,5 +33,9 @@ if [ "$args" = "issue view 7 --comments" ]; then
   printf '%s\n' '--'
   exit 0
 fi
+if [ "$args" = "pr list --state all --limit 100 --json number,title,url,state,headRefName" ]; then
+  printf '%s\n' '[]'
+  exit 0
+fi
 echo "unexpected gh args: $args" >&2
 exit 1

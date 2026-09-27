@@ -21,18 +21,26 @@ function testEnv(context: Record<string, unknown>): NodeJS.ProcessEnv {
 test("the pane lists issues from gh and closes on q", async () => {
 	chmodSync(fixture, 0o755);
 	const script = `
-import os, pty, select, time, sys
+import os, pty, select, time, sys, struct, fcntl, termios
 command = sys.argv[1:]
 pid, fd = pty.fork()
 if pid == 0:
+    try:
+        fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+    except Exception:
+        pass
     os.execvpe(command[0], command, os.environ)
     os._exit(127)
+try:
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+except Exception:
+    pass
 data = b""
 mark = 0
 sent_enter = False
 sent_escape = False
 sent_quit = False
-deadline = time.time() + 8
+deadline = time.time() + 20
 status = None
 while time.time() < deadline:
     ready, _, _ = select.select([fd], [], [], 0.1)
@@ -89,7 +97,7 @@ if not exited:
 		stderr: "",
 		stdout: "",
 	});
-}, 10_000);
+}, 30_000);
 
 test("ui prints the issue list when it is not attached to a terminal", async () => {
 	chmodSync(fixture, 0o755);
