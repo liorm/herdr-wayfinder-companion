@@ -1,0 +1,25 @@
+#!/bin/sh
+set -e
+
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Ensure common paths are in PATH for child subprocesses (e.g. gh, bun)
+for dir in "$HOME/.bun/bin" "$HOME/.local/bin" "/usr/local/bin" "/opt/homebrew/bin" "$BUN_INSTALL/bin"; do
+  if [ -n "$dir" ] && [ -d "$dir" ] && case ":$PATH:" in *":$dir:"*) false;; *) true;; esac; then
+    export PATH="$dir:$PATH"
+  fi
+done
+
+EXECUTABLE="$DIR/dist/wayfinder-companion"
+
+if [ -x "$EXECUTABLE" ]; then
+  exec "$EXECUTABLE" "$@"
+fi
+
+# Fallback to bun running main.ts directly (e.g. during link / development)
+if ! command -v bun >/dev/null 2>&1; then
+  echo "Error: 'bun' was not found on PATH or standard install locations." >&2
+  exit 127
+fi
+
+exec bun "$DIR/src/main.ts" "$@"

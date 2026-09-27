@@ -7,22 +7,22 @@ platforms = ["linux", "macos", "windows"]
 
 # Runs on `herdr plugin install` only. `plugin link` does not run build commands.
 [[build]]
-command = ["bun", "install", "--frozen-lockfile"]
+command = ["sh", "bin/build"]
 
 [[actions]]
 id = "status"
 title = "Session status"
 contexts = ["workspace"]
-command = ["bun", "src/main.ts", "status"]
+command = ["sh", "bin/run", "status"]
 
 [[actions]]
 id = "open"
 title = "Open Wayfinder Companion"
 contexts = ["workspace"]
-command = ["bun", "src/main.ts", "open"]
+command = ["sh", "bin/run", "open"]
 
 [[panes]]
 id = "board"
 title = "Wayfinder Companion"
 placement = "split"
-command = ["bun", "src/main.ts", "ui"]
+command = ["sh", "bin/run", "ui"]

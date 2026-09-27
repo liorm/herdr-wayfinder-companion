@@ -11,13 +11,15 @@
 		"lint": "biome lint",
 		"lint:fix": "biome lint --write",
 		"format": "biome format --write",
-		"format:check": "biome format"
+		"format:check": "biome format",
+		"build": "bun build src/main.ts --compile --outfile dist/wayfinder-companion"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.5.14",
 		"@types/bun": "^1.3.14",
 		"@types/marked-terminal": "^6.1.1",
 		"@types/react": "^19.3.0",
+		"react-devtools-core": "^8.0.0",
 		"typescript": "^5.9.3"
 	},
 	"engines": {

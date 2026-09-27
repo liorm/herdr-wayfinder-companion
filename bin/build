@@ -1,0 +1,49 @@
+#!/bin/sh
+set -e
+
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$DIR"
+
+# 1. Look for bun in PATH and standard directories
+if ! command -v bun >/dev/null 2>&1; then
+  for dir in "$HOME/.bun/bin" "$HOME/.local/bin" "/usr/local/bin" "/opt/homebrew/bin" "$BUN_INSTALL/bin"; do
+    if [ -n "$dir" ] && [ -x "$dir/bun" ]; then
+      export PATH="$dir:$PATH"
+      break
+    fi
+  done
+fi
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "Error: 'bun' was not found on PATH or standard locations (~/.bun/bin, ~/.local/bin)." >&2
+  echo "Please install Bun (https://bun.sh) and ensure it is in PATH." >&2
+  exit 127
+fi
+
+# 2. Look for gh (GitHub CLI) in PATH and standard directories
+if ! command -v gh >/dev/null 2>&1; then
+  for dir in "$HOME/.local/bin" "/usr/local/bin" "/opt/homebrew/bin" "/usr/bin" "/bin"; do
+    if [ -n "$dir" ] && [ -x "$dir/gh" ]; then
+      export PATH="$dir:$PATH"
+      break
+    fi
+  done
+fi
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "Error: 'gh' (GitHub CLI) was not found on PATH or standard locations (/usr/local/bin, /opt/homebrew/bin, ~/.local/bin)." >&2
+  echo "Please install the GitHub CLI (https://cli.github.com) and authenticate with 'gh auth login'." >&2
+  exit 127
+fi
+
+# 3. Install dependencies
+echo "Installing dependencies..."
+bun install --frozen-lockfile
+
+# 4. Compile standalone executable
+echo "Building standalone executable..."
+mkdir -p "$DIR/dist"
+bun build "$DIR/src/main.ts" --compile --outfile "$DIR/dist/wayfinder-companion"
+chmod +x "$DIR/dist/wayfinder-companion"
+
+echo "Build successful: dist/wayfinder-companion"
