@@ -1,310 +1,387 @@
 import { ISSUE_LIMIT, type Issue, type IssueState } from "../github/issues.ts";
-import { boardRows, lineOfSelection, selectableIssues, type BoardRow, type RowTone } from "../wayfinder/board.ts";
+import {
+	boardRows,
+	lineOfSelection,
+	selectableIssues,
+	type BoardRow,
+	type RowTone,
+} from "../wayfinder/board.ts";
 import type { SiblingAgent } from "../sibling.ts";
 import { formatTicketView, TICKET_FOOTER } from "./ticket.ts";
 import { centerLine, padLine } from "./dialog.ts";
 
 export interface ListModel {
-  kind: "list";
-  repo: string;
-  state: IssueState;
-  issues: Issue[];
-  selected: number;
-  scroll: number;
-  notice?: string;
-  sibling?: SiblingAgent;
+	kind: "list";
+	repo: string;
+	state: IssueState;
+	issues: Issue[];
+	selected: number;
+	scroll: number;
+	notice?: string;
+	sibling?: SiblingAgent;
 }
 
 export interface DetailModel {
-  kind: "detail";
-  issue: Issue;
-  body: string;
-  /** Raw `gh issue view --comments` text. Omitted when the view has no comments. */
-  comments?: string;
-  scroll: number;
-  list: ListModel;
+	kind: "detail";
+	issue: Issue;
+	body: string;
+	/** Raw `gh issue view --comments` text. Omitted when the view has no comments. */
+	comments?: string;
+	scroll: number;
+	list: ListModel;
 }
 
 export interface MessageModel {
-  kind: "message";
-  title: string;
-  lines: string[];
-  footer: string;
+	kind: "message";
+	title: string;
+	lines: string[];
+	footer: string;
 }
 
 export interface DialogModel {
-  kind: "dialog";
-  title: string;
-  message: string;
-  detail?: string;
-  base?: ListModel | DetailModel;
+	kind: "dialog";
+	title: string;
+	message: string;
+	detail?: string;
+	base?: ListModel | DetailModel;
 }
 
 export type PaneModel = ListModel | DetailModel | MessageModel | DialogModel;
 
-export function reveal(selected: number, scroll: number, windowSize: number): number {
-  if (windowSize <= 0) return 0;
-  if (selected < scroll) return selected;
-  if (selected >= scroll + windowSize) return selected - windowSize + 1;
-  return scroll;
+export function reveal(
+	selected: number,
+	scroll: number,
+	windowSize: number,
+): number {
+	if (windowSize <= 0) return 0;
+	if (selected < scroll) return selected;
+	if (selected >= scroll + windowSize) return selected - windowSize + 1;
+	return scroll;
 }
 
-export function moveScroll(scroll: number, delta: number, lineCount: number, windowSize: number): number {
-  const max = Math.max(0, lineCount - Math.max(windowSize, 0));
-  return Math.min(max, Math.max(0, scroll + delta));
+export function moveScroll(
+	scroll: number,
+	delta: number,
+	lineCount: number,
+	windowSize: number,
+): number {
+	const max = Math.max(0, lineCount - Math.max(windowSize, 0));
+	return Math.min(max, Math.max(0, scroll + delta));
 }
 
-export function preserveSelection(issues: Issue[], selected: number, previousNumber: number | undefined): number {
-  if (issues.length === 0) return 0;
-  if (previousNumber !== undefined) {
-    const kept = issues.findIndex((issue) => issue.number === previousNumber);
-    if (kept >= 0) return kept;
-  }
-  return Math.min(selected, issues.length - 1);
+export function preserveSelection(
+	issues: Issue[],
+	selected: number,
+	previousNumber: number | undefined,
+): number {
+	if (issues.length === 0) return 0;
+	if (previousNumber !== undefined) {
+		const kept = issues.findIndex((issue) => issue.number === previousNumber);
+		if (kept >= 0) return kept;
+	}
+	return Math.min(selected, issues.length - 1);
 }
 
-export function renderPane(model: PaneModel, columns: number, rows: number): string {
-  const width = Math.max(columns, 1);
-  const height = Math.max(rows, 1);
-  const lines = model.kind === "list"
-    ? listLines(model, width, height)
-    : model.kind === "detail"
-      ? detailLines(model, width, height)
-      : model.kind === "message"
-        ? messageLines(model, width, height)
-        : dialogLines(model, width, height);
-  let frame = "\x1b[H";
-  for (let row = 0; row < height; row++) {
-    frame += `\x1b[${row + 1};1H${lines[row] ?? blank(width)}`;
-  }
-  return frame;
+export function renderPane(
+	model: PaneModel,
+	columns: number,
+	rows: number,
+): string {
+	const width = Math.max(columns, 1);
+	const height = Math.max(rows, 1);
+	const lines =
+		model.kind === "list"
+			? listLines(model, width, height)
+			: model.kind === "detail"
+				? detailLines(model, width, height)
+				: model.kind === "message"
+					? messageLines(model, width, height)
+					: dialogLines(model, width, height);
+	let frame = "\x1b[H";
+	for (let row = 0; row < height; row++) {
+		frame += `\x1b[${row + 1};1H${lines[row] ?? blank(width)}`;
+	}
+	return frame;
 }
 
 export function formatAgentDetails(sibling: SiblingAgent): string {
-  const agentName = sibling.agent;
-  const status = sibling.status;
-  const message = sibling.lastMessage;
+	const agentName = sibling.agent;
+	const status = sibling.status;
+	const message = sibling.lastMessage;
 
-  let label = "";
-  if (agentName && status) {
-    label = `${agentName} (${status})`;
-  } else if (agentName) {
-    label = agentName;
-  } else if (status) {
-    label = `agent (${status})`;
-  }
+	let label = "";
+	if (agentName && status) {
+		label = `${agentName} (${status})`;
+	} else if (agentName) {
+		label = agentName;
+	} else if (status) {
+		label = `agent (${status})`;
+	}
 
-  if (label && message) {
-    return `${label}: ${message}`;
-  }
-  if (message) {
-    return message;
-  }
-  if (label) {
-    return label;
-  }
-  return "";
+	if (label && message) {
+		return `${label}: ${message}`;
+	}
+	if (message) {
+		return message;
+	}
+	if (label) {
+		return label;
+	}
+	return "";
 }
 
-export function formatSubtitle(summary: string, notice?: string, sibling?: SiblingAgent): string {
-  if (notice) return notice;
-  if (!sibling) return summary;
-  const details = formatAgentDetails(sibling);
-  return details ? `${summary} · ${details}` : summary;
+export function formatSubtitle(
+	summary: string,
+	notice?: string,
+	sibling?: SiblingAgent,
+): string {
+	if (notice) return notice;
+	if (!sibling) return summary;
+	const details = formatAgentDetails(sibling);
+	return details ? `${summary} · ${details}` : summary;
 }
 
 export function formatPlainIssues(
-  repo: string,
-  state: IssueState,
-  issues: Issue[],
-  sibling?: SiblingAgent,
+	repo: string,
+	state: IssueState,
+	issues: Issue[],
+	sibling?: SiblingAgent,
 ): string {
-  const summary = `${repo}  (${state})`;
-  const header = sibling ? formatSubtitle(summary, undefined, sibling) : summary;
-  const lines = [header, ""];
-  const rows = boardRows(issues);
-  if (selectableIssues(rows).length === 0) {
-    lines.push(`No ${state} issues.`);
-  } else {
-    for (const row of rows) lines.push(rowText(row, 200));
-  }
-  return lines.join("\n");
+	const summary = `${repo}  (${state})`;
+	const header = sibling
+		? formatSubtitle(summary, undefined, sibling)
+		: summary;
+	const lines = [header, ""];
+	const rows = boardRows(issues);
+	if (selectableIssues(rows).length === 0) {
+		lines.push(`No ${state} issues.`);
+	} else {
+		for (const row of rows) lines.push(rowText(row, 200));
+	}
+	return lines.join("\n");
 }
 
 function listLines(model: ListModel, columns: number, rows: number): string[] {
-  const windowSize = Math.max(rows - 3, 1);
-  const laid = boardRows(model.issues);
-  const selectedLine = lineOfSelection(laid, model.selected);
-  const scroll = reveal(selectedLine, model.scroll, windowSize);
-  const count = model.issues.length === ISSUE_LIMIT ? `${ISSUE_LIMIT} (limit)` : String(model.issues.length);
-  const maps = model.issues.filter((issue) => issue.labels.includes("wayfinder:map")).length;
-  const summary = maps > 0 ? `${model.state} · ${count} · ${maps} ${maps === 1 ? "map" : "maps"}` : `${model.state} · ${count}`;
-  const subtitle = formatSubtitle(summary, model.notice, model.sibling);
-  const lines = [
-    pad(clip(`Wayfinder Companion  ${model.repo}`, columns), columns),
-    pad(clip(subtitle, columns), columns),
-  ];
-  if (selectableIssues(laid).length === 0) {
-    lines.push(pad(clip(`No ${model.state} issues.`, columns), columns));
-  } else {
-    for (let index = 0; index < windowSize; index++) {
-      const row = laid[scroll + index];
-      if (!row) {
-        lines.push(blank(columns));
-        continue;
-      }
-      const text = pad(rowText(row, columns), columns);
-      const selected = row.type === "issue" && scroll + index === selectedLine;
-      const tone = row.type === "issue" ? row.tone : "plain";
-      lines.push(paint(text, tone, selected, row.type === "label"));
-    }
-  }
-  while (lines.length < rows - 1) lines.push(blank(columns));
-  lines.push(pad(clip("j/k move   enter view   w work   f filter   r refresh   q close", columns), columns));
-  return lines.slice(0, rows);
+	const windowSize = Math.max(rows - 3, 1);
+	const laid = boardRows(model.issues);
+	const selectedLine = lineOfSelection(laid, model.selected);
+	const scroll = reveal(selectedLine, model.scroll, windowSize);
+	const count =
+		model.issues.length === ISSUE_LIMIT
+			? `${ISSUE_LIMIT} (limit)`
+			: String(model.issues.length);
+	const maps = model.issues.filter((issue) =>
+		issue.labels.includes("wayfinder:map"),
+	).length;
+	const summary =
+		maps > 0
+			? `${model.state} · ${count} · ${maps} ${maps === 1 ? "map" : "maps"}`
+			: `${model.state} · ${count}`;
+	const subtitle = formatSubtitle(summary, model.notice, model.sibling);
+	const lines = [
+		pad(clip(`Wayfinder Companion  ${model.repo}`, columns), columns),
+		pad(clip(subtitle, columns), columns),
+	];
+	if (selectableIssues(laid).length === 0) {
+		lines.push(pad(clip(`No ${model.state} issues.`, columns), columns));
+	} else {
+		for (let index = 0; index < windowSize; index++) {
+			const row = laid[scroll + index];
+			if (!row) {
+				lines.push(blank(columns));
+				continue;
+			}
+			const text = pad(rowText(row, columns), columns);
+			const selected = row.type === "issue" && scroll + index === selectedLine;
+			const tone = row.type === "issue" ? row.tone : "plain";
+			lines.push(paint(text, tone, selected, row.type === "label"));
+		}
+	}
+	while (lines.length < rows - 1) lines.push(blank(columns));
+	lines.push(
+		pad(
+			clip(
+				"j/k move   enter view   w work   f filter   r refresh   q close",
+				columns,
+			),
+			columns,
+		),
+	);
+	return lines.slice(0, rows);
 }
 
-function detailLines(model: DetailModel, columns: number, rows: number): string[] {
-  const text = model.body.trim().length > 0 ? model.body : (model.issue.body?.trim() ?? "");
-  const body = formatTicketView(model.issue, text, model.comments ?? "", columns, model.list.issues);
-  if (rows <= 1) return [pad(clip(TICKET_FOOTER, columns), columns)];
-  const windowSize = rows - 1;
-  const scroll = moveScroll(model.scroll, 0, body.length, windowSize);
-  const lines: string[] = [];
-  for (let index = 0; index < windowSize; index++) {
-    lines.push(padAnsi(clipAnsi(body[scroll + index] ?? "", columns), columns));
-  }
-  lines.push(pad(clip(TICKET_FOOTER, columns), columns));
-  return lines.slice(0, rows);
+function detailLines(
+	model: DetailModel,
+	columns: number,
+	rows: number,
+): string[] {
+	const text =
+		model.body.trim().length > 0
+			? model.body
+			: (model.issue.body?.trim() ?? "");
+	const body = formatTicketView(
+		model.issue,
+		text,
+		model.comments ?? "",
+		columns,
+		model.list.issues,
+	);
+	if (rows <= 1) return [pad(clip(TICKET_FOOTER, columns), columns)];
+	const windowSize = rows - 1;
+	const scroll = moveScroll(model.scroll, 0, body.length, windowSize);
+	const lines: string[] = [];
+	for (let index = 0; index < windowSize; index++) {
+		lines.push(padAnsi(clipAnsi(body[scroll + index] ?? "", columns), columns));
+	}
+	lines.push(pad(clip(TICKET_FOOTER, columns), columns));
+	return lines.slice(0, rows);
 }
 
-function messageLines(model: MessageModel, columns: number, rows: number): string[] {
-  const lines = [pad(clip(model.title, columns), columns), blank(columns)];
-  const bodyRoom = Math.max(rows - 3, 0);
-  for (const line of model.lines.slice(0, bodyRoom)) lines.push(pad(clip(line, columns), columns));
-  while (lines.length < rows - 1) lines.push(blank(columns));
-  lines.push(pad(clip(model.footer, columns), columns));
-  return lines.slice(0, rows);
+function messageLines(
+	model: MessageModel,
+	columns: number,
+	rows: number,
+): string[] {
+	const lines = [pad(clip(model.title, columns), columns), blank(columns)];
+	const bodyRoom = Math.max(rows - 3, 0);
+	for (const line of model.lines.slice(0, bodyRoom))
+		lines.push(pad(clip(line, columns), columns));
+	while (lines.length < rows - 1) lines.push(blank(columns));
+	lines.push(pad(clip(model.footer, columns), columns));
+	return lines.slice(0, rows);
 }
 
-function dialogLines(model: DialogModel, columns: number, rows: number): string[] {
-  const baseLines = model.base
-    ? (model.base.kind === "list" ? listLines(model.base, columns, rows) : detailLines(model.base, columns, rows))
-    : Array.from({ length: rows }, () => blank(columns));
+function dialogLines(
+	model: DialogModel,
+	columns: number,
+	rows: number,
+): string[] {
+	const baseLines = model.base
+		? model.base.kind === "list"
+			? listLines(model.base, columns, rows)
+			: detailLines(model.base, columns, rows)
+		: Array.from({ length: rows }, () => blank(columns));
 
-  const dialogWidth = Math.min(Math.max(columns - 4, 36), 64);
-  const innerWidth = dialogWidth - 2;
-  const left = Math.max(0, Math.floor((columns - dialogWidth) / 2));
+	const dialogWidth = Math.min(Math.max(columns - 4, 36), 64);
+	const innerWidth = dialogWidth - 2;
+	const left = Math.max(0, Math.floor((columns - dialogWidth) / 2));
 
-  const dialogBoxLines: string[] = [
-    `╭${"─".repeat(innerWidth)}╮`,
-    `│${padLine(` [ ${model.title} ]`, innerWidth)}│`,
-    `│${padLine("", innerWidth)}│`,
-    `│${padLine(`  ╔═════╗  ${model.message}`, innerWidth)}│`,
-    `│${padLine(`  ║  ✖  ║  ${model.detail ?? ""}`, innerWidth)}│`,
-    `│${padLine(`  ╚═════╝`, innerWidth)}│`,
-    `│${padLine("", innerWidth)}│`,
-    `│${centerLine("[ OK ] (Enter or Esc)", innerWidth)}│`,
-    `╰${"─".repeat(innerWidth)}╯`,
-  ];
+	const dialogBoxLines: string[] = [
+		`╭${"─".repeat(innerWidth)}╮`,
+		`│${padLine(` [ ${model.title} ]`, innerWidth)}│`,
+		`│${padLine("", innerWidth)}│`,
+		`│${padLine(`  ╔═════╗  ${model.message}`, innerWidth)}│`,
+		`│${padLine(`  ║  ✖  ║  ${model.detail ?? ""}`, innerWidth)}│`,
+		`│${padLine(`  ╚═════╝`, innerWidth)}│`,
+		`│${padLine("", innerWidth)}│`,
+		`│${centerLine("[ OK ] (Enter or Esc)", innerWidth)}│`,
+		`╰${"─".repeat(innerWidth)}╯`,
+	];
 
-  const top = Math.max(0, Math.floor((rows - dialogBoxLines.length) / 2));
-  const output: string[] = [...baseLines];
+	const top = Math.max(0, Math.floor((rows - dialogBoxLines.length) / 2));
+	const output: string[] = [...baseLines];
 
-  for (let i = 0; i < dialogBoxLines.length; i++) {
-    const rowIdx = top + i;
-    if (rowIdx >= rows) break;
-    const baseLine = output[rowIdx] ?? blank(columns);
-    const dialogLine = dialogBoxLines[i] ?? "";
-    const before = [...baseLine].slice(0, left).join("");
-    const after = [...baseLine].slice(left + dialogWidth).join("");
-    output[rowIdx] = pad(before + dialogLine + after, columns);
-  }
+	for (let i = 0; i < dialogBoxLines.length; i++) {
+		const rowIdx = top + i;
+		if (rowIdx >= rows) break;
+		const baseLine = output[rowIdx] ?? blank(columns);
+		const dialogLine = dialogBoxLines[i] ?? "";
+		const before = [...baseLine].slice(0, left).join("");
+		const after = [...baseLine].slice(left + dialogWidth).join("");
+		output[rowIdx] = pad(before + dialogLine + after, columns);
+	}
 
-  return output.slice(0, rows);
+	return output.slice(0, rows);
 }
-
 
 export { terminalLink } from "./link.ts";
 
 function rowText(row: BoardRow, width: number): string {
-  if (row.type === "label") return clip(row.text, width);
-  const indent = "  ".repeat(row.depth);
-  const prefix = `${indent}#${row.issue.number}  `;
-  const badges = row.badges.length > 0 ? `  ${row.badges.join(" · ")}` : "";
-  const budget = width - visibleWidth(prefix) - visibleWidth(badges);
-  if (budget < 8) return clipAnsi(`${prefix}${row.issue.title}${badges}`, width);
-  return `${prefix}${clipAnsi(row.issue.title, budget)}${badges}`;
+	if (row.type === "label") return clip(row.text, width);
+	const indent = "  ".repeat(row.depth);
+	const prefix = `${indent}#${row.issue.number}  `;
+	const badges = row.badges.length > 0 ? `  ${row.badges.join(" · ")}` : "";
+	const budget = width - visibleWidth(prefix) - visibleWidth(badges);
+	if (budget < 8)
+		return clipAnsi(`${prefix}${row.issue.title}${badges}`, width);
+	return `${prefix}${clipAnsi(row.issue.title, budget)}${badges}`;
 }
 
 export function clip(text: string, width: number): string {
-  if (width <= 0) return "";
-  const chars = [...text];
-  if (chars.length <= width) return text;
-  if (width === 1) return "…";
-  return `${chars.slice(0, width - 1).join("")}…`;
+	if (width <= 0) return "";
+	const chars = [...text];
+	if (chars.length <= width) return text;
+	if (width === 1) return "…";
+	return `${chars.slice(0, width - 1).join("")}…`;
 }
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequence contains ESC and BEL
 const ANSI = /\x1b\[[0-9;]*m|\x1b\]8;;.*?(?:\x07|\x1b\\)/g;
 
 export function visibleWidth(text: string): number {
-  return [...text.replace(ANSI, "")].length;
+	return [...text.replace(ANSI, "")].length;
 }
 
 /** Clip by visible cells so ANSI color codes are not counted as width. */
 export function clipAnsi(text: string, width: number): string {
-  if (width <= 0) return "";
-  if (visibleWidth(text) <= width) return text;
-  let visible = 0;
-  let out = "";
-  const pattern = /\x1b\[[0-9;]*m|\x1b\]8;;.*?(?:\x07|\x1b\\)/g;
-  let cursor = 0;
-  for (const match of text.matchAll(pattern)) {
-    const index = match.index ?? 0;
-    const plain = [...text.slice(cursor, index)];
-    if (visible + plain.length >= width) {
-      out += plain.slice(0, width - visible).join("");
-      return `${out}\x1b[0m`;
-    }
-    out += text.slice(cursor, index) + match[0];
-    visible += plain.length;
-    cursor = index + match[0].length;
-  }
-  out += [...text.slice(cursor)].slice(0, width - visible).join("");
-  return `${out}\x1b[0m`;
+	if (width <= 0) return "";
+	if (visibleWidth(text) <= width) return text;
+	let visible = 0;
+	let out = "";
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequence contains ESC and BEL
+	const pattern = /\x1b\[[0-9;]*m|\x1b\]8;;.*?(?:\x07|\x1b\\)/g;
+	let cursor = 0;
+	for (const match of text.matchAll(pattern)) {
+		const index = match.index ?? 0;
+		const plain = [...text.slice(cursor, index)];
+		if (visible + plain.length >= width) {
+			out += plain.slice(0, width - visible).join("");
+			return `${out}\x1b[0m`;
+		}
+		out += text.slice(cursor, index) + match[0];
+		visible += plain.length;
+		cursor = index + match[0].length;
+	}
+	out += [...text.slice(cursor)].slice(0, width - visible).join("");
+	return `${out}\x1b[0m`;
 }
 
 function pad(text: string, width: number): string {
-  const extra = width - [...text].length;
-  return extra > 0 ? text + " ".repeat(extra) : text;
+	const extra = width - [...text].length;
+	return extra > 0 ? text + " ".repeat(extra) : text;
 }
 
 function padAnsi(text: string, width: number): string {
-  const extra = width - visibleWidth(text);
-  return extra > 0 ? text + " ".repeat(extra) : text;
+	const extra = width - visibleWidth(text);
+	return extra > 0 ? text + " ".repeat(extra) : text;
 }
 
 function blank(width: number): string {
-  return " ".repeat(Math.max(width, 0));
+	return " ".repeat(Math.max(width, 0));
 }
 
 /** SGR codes. Kind stays uncolored; these are the work states on a pass-the-ink board. */
 const TONE_SGR: Record<RowTone, string | undefined> = {
-  blocked: "31",
-  progress: "32",
-  frontier: "36",
-  ready: "35",
-  attention: "33",
-  closed: "2",
-  map: "34",
-  plain: undefined,
+	blocked: "31",
+	progress: "32",
+	frontier: "36",
+	ready: "35",
+	attention: "33",
+	closed: "2",
+	map: "34",
+	plain: undefined,
 };
 
-function paint(text: string, tone: RowTone, selected: boolean, label = false): string {
-  const color = label ? "2" : TONE_SGR[tone];
-  if (!color && !selected) return text;
-  let open = "";
-  if (color) open += `\x1b[${color}m`;
-  if (selected) open += "\x1b[7m";
-  return `${open}${text}\x1b[0m`;
+function paint(
+	text: string,
+	tone: RowTone,
+	selected: boolean,
+	label = false,
+): string {
+	const color = label ? "2" : TONE_SGR[tone];
+	if (!color && !selected) return text;
+	let open = "";
+	if (color) open += `\x1b[${color}m`;
+	if (selected) open += "\x1b[7m";
+	return `${open}${text}\x1b[0m`;
 }

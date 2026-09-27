@@ -12,6 +12,10 @@ Requires Herdr `0.7.0` or newer, `bun` on `PATH`, and an authenticated `gh`.
 bun install
 bun test
 bun run typecheck
+bun run lint
+bun run lint:fix
+bun run format
+bun run format:check
 herdr plugin link "$PWD"
 herdr plugin action invoke wayfinder.companion.status
 herdr plugin action invoke wayfinder.companion.open

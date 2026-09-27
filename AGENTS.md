@@ -21,6 +21,10 @@ Read [docs/herdr-plugin.md](docs/herdr-plugin.md) before adding actions, panes, 
 bun install
 bun test
 bun run typecheck
+bun run lint
+bun run lint:fix
+bun run format
+bun run format:check
 ```
 
 `herdr plugin link` does not run the manifest build. Install dependencies before linking.

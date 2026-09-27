@@ -5,22 +5,22 @@ const root = new URL("..", import.meta.url).pathname;
 const fixture = new URL("./fixtures/gh", import.meta.url).pathname;
 
 function testEnv(context: Record<string, unknown>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    PATH: `${new URL("./fixtures", import.meta.url).pathname}:${process.env.PATH ?? ""}`,
-    HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify(context),
-  };
-  delete env.HERDR_PANE_ID;
-  delete env.HERDR_BIN_PATH;
-  delete env.HERDR_PLUGIN_ENTRYPOINT_ID;
-  delete env.HERDR_WORKSPACE_ID;
-  delete env.HERDR_TAB_ID;
-  return env;
+	const env: NodeJS.ProcessEnv = {
+		...process.env,
+		PATH: `${new URL("./fixtures", import.meta.url).pathname}:${process.env.PATH ?? ""}`,
+		HERDR_PLUGIN_CONTEXT_JSON: JSON.stringify(context),
+	};
+	delete env.HERDR_PANE_ID;
+	delete env.HERDR_BIN_PATH;
+	delete env.HERDR_PLUGIN_ENTRYPOINT_ID;
+	delete env.HERDR_WORKSPACE_ID;
+	delete env.HERDR_TAB_ID;
+	return env;
 }
 
 test("the pane lists issues from gh and closes on q", async () => {
-  chmodSync(fixture, 0o755);
-  const script = `
+	chmodSync(fixture, 0o755);
+	const script = `
 import os, pty, select, time, sys
 command = sys.argv[1:]
 pid, fd = pty.fork()
@@ -70,36 +70,43 @@ if not exited:
     sys.stderr.buffer.write(data)
     sys.exit(1)
 `;
-  const proc = Bun.spawn(["python3", "-c", script, process.execPath, "src/main.ts", "ui"], {
-    cwd: root,
-    stdout: "pipe",
-    stderr: "pipe",
-    env: testEnv({ focused_pane_cwd: root }),
-  });
-  const [stdout, stderr, status] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  expect({ status, stderr, stdout }).toEqual({ status: 0, stderr: "", stdout: "" });
+	const proc = Bun.spawn(
+		["python3", "-c", script, process.execPath, "src/main.ts", "ui"],
+		{
+			cwd: root,
+			stdout: "pipe",
+			stderr: "pipe",
+			env: testEnv({ focused_pane_cwd: root }),
+		},
+	);
+	const [stdout, stderr, status] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	expect({ status, stderr, stdout }).toEqual({
+		status: 0,
+		stderr: "",
+		stdout: "",
+	});
 }, 10_000);
 
 test("ui prints the issue list when it is not attached to a terminal", async () => {
-  chmodSync(fixture, 0o755);
-  const proc = Bun.spawn([process.execPath, "src/main.ts", "ui"], {
-    cwd: root,
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-    env: testEnv({ workspace_cwd: root }),
-  });
-  const [stdout, stderr, status] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  expect(status).toBe(0);
-  expect(stderr).toBe("");
-  expect(stdout).toContain("acme/widgets  (open)");
-  expect(stdout).toContain("#7  Fix the gate  bug");
+	chmodSync(fixture, 0o755);
+	const proc = Bun.spawn([process.execPath, "src/main.ts", "ui"], {
+		cwd: root,
+		stdout: "pipe",
+		stderr: "pipe",
+		stdin: "ignore",
+		env: testEnv({ workspace_cwd: root }),
+	});
+	const [stdout, stderr, status] = await Promise.all([
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	expect(status).toBe(0);
+	expect(stderr).toBe("");
+	expect(stdout).toContain("acme/widgets  (open)");
+	expect(stdout).toContain("#7  Fix the gate  bug");
 });
