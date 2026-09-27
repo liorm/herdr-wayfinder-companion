@@ -15,6 +15,9 @@ function testEnv(context: Record<string, unknown>): NodeJS.ProcessEnv {
 	delete env.HERDR_PLUGIN_ENTRYPOINT_ID;
 	delete env.HERDR_WORKSPACE_ID;
 	delete env.HERDR_TAB_ID;
+	delete env.CI;
+	delete env.CONTINUOUS_INTEGRATION;
+	delete env.GITHUB_ACTIONS;
 	return env;
 }
 

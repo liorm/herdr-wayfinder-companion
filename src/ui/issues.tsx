@@ -189,7 +189,7 @@ async function renderMessage(
 					footer: "q close",
 				}}
 			/>,
-			{ exitOnCtrlC: false },
+			{ exitOnCtrlC: false, interactive: true },
 		);
 		await inkInstance.waitUntilExit();
 		return code;
@@ -236,7 +236,7 @@ async function startInkApp(props: {
 				fetchBranches={props.fetchBranches}
 				fetchPRs={props.fetchPRs}
 			/>,
-			{ exitOnCtrlC: false },
+			{ exitOnCtrlC: false, interactive: true },
 		);
 		await inkInstance.waitUntilExit();
 		return 0;
