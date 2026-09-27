@@ -6,7 +6,9 @@ Read [docs/herdr-plugin.md](docs/herdr-plugin.md) before adding actions, panes, 
 
 ## Layout
 
-- `herdr-plugin.toml` declares the actions and the `board` pane (`placement = "split"`). Herdr runs `bun src/main.ts`.
+- `herdr-plugin.toml` declares the actions and the `board` pane (`placement = "split"`). Herdr runs `sh bin/run <action|ui>`.
+- `bin/build` verifies `bun` and `gh`, runs `bun install --frozen-lockfile`, and compiles `dist/wayfinder-companion`.
+- `bin/run` runs the compiled `dist/wayfinder-companion` binary (or falls back to `bun src/main.ts`).
 - `src/main.ts` routes `status`, `open`, and `ui`.
 - `src/runtime.ts` reads the Herdr environment and invocation context.
 - `src/herdr.ts` calls the Herdr CLI through `HERDR_BIN_PATH`.
@@ -19,6 +21,7 @@ Read [docs/herdr-plugin.md](docs/herdr-plugin.md) before adding actions, panes, 
 
 ```sh
 bun install
+bun run build
 bun test
 bun run typecheck
 bun run lint
@@ -27,7 +30,7 @@ bun run format
 bun run format:check
 ```
 
-`herdr plugin link` does not run the manifest build. Install dependencies before linking.
+`herdr plugin link` does not run the manifest build. Install dependencies and build before linking.
 
 ## Working on the plugin
 

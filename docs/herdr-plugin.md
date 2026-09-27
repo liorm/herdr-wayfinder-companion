@@ -23,7 +23,7 @@ This file was written against Herdr 0.9.1 and those docs. Prefer `herdr api sche
 
 Herdr owns install, manifest validation, keybindings, panes, events, invocation context, and socket access. The plugin owns its language, dependencies, files, and durable state.
 
-Commands are argv arrays. Herdr does not run them through a shell. This repo uses `["bun", "src/main.ts", "<command>"]`. Bun must be on `PATH`. On Windows, action and event commands resolve `bun.cmd`; pane commands must still be a real Windows argv command.
+Commands are argv arrays. Herdr does not run them through a shell. This repo uses `["sh", "bin/run", "<command>"]`, where `bin/run` finds `bun` / `gh` in PATH or standard install paths and launches the standalone binary compiled by `bin/build` (falling back to `bun src/main.ts` in development).
 
 Runtime commands start with the plugin directory as their cwd. That directory is the linked checkout or the managed GitHub checkout. It is not the user's project. Read `focused_pane_cwd`, then `workspace_cwd`, from `HERDR_PLUGIN_CONTEXT_JSON` before running `gh` or anything else that should follow the workspace.
 
@@ -37,7 +37,7 @@ Plugin ids may contain ASCII letters, digits, `.`, `:`, `_`, and `-`. Action, pa
 
 | Block | When it runs | Used here |
 | --- | --- | --- |
-| `[[build]]` | `herdr plugin install` only, before registration. No plugin env or socket env. | `bun install --frozen-lockfile` |
+| `[[build]]` | `herdr plugin install` only, before registration. No plugin env or socket env. | `sh bin/build` (checks `bun`/`gh`, installs dependencies, compiles standalone executable) |
 | `[[startup]]` | Once after session restore, when the API socket is ready, and again on live handoff. Not on client attach, config reload, link, or enable. One-shot: do the work and exit. Failure does not stop the server. | No |
 | `[[actions]]` | `herdr plugin action invoke`, a keybinding, or a link handler. | `status`, `open` |
 | `[[events]]` | When an enabled plugin's `on` name matches an emitted event. Unknown names link with a warning. | No |

@@ -5,6 +5,8 @@ node_modules/
 # Build
 dist/
 *.tsbuildinfo
+*.bun-build
+.*.bun-build
 
 # Tests and coverage
 coverage/

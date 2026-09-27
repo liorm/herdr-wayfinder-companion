@@ -2,14 +2,15 @@
 
 A [Herdr](https://herdr.dev) plugin that lists the current repo's GitHub issues in a split pane. Wayfinder maps are the roots, and the other tickets sit underneath them. The plugin id is `wayfinder.companion`.
 
-Herdr launches the commands in `herdr-plugin.toml`. This package is TypeScript run by [Bun](https://bun.sh). There is no compile step: `bun src/main.ts` is the entrypoint. The issue list comes from the GitHub CLI (`gh`), run in the focused pane's directory, or the workspace directory when the pane has none.
+Herdr launches the commands in `herdr-plugin.toml` via `bin/run`. On plugin install, `bin/build` verifies prerequisites (`gh` and `bun`), installs dependencies, and compiles a standalone binary `dist/wayfinder-companion`. In development, `bin/run` can also run `bun src/main.ts` directly. The issue list comes from the GitHub CLI (`gh`), run in the focused pane's directory, or the workspace directory when the pane has none.
 
-Requires Herdr `0.7.0` or newer, `bun` on `PATH`, and an authenticated `gh`.
+Requires Herdr `0.7.0` or newer, `bun` (during install/build), and an authenticated `gh`.
 
 ## Develop
 
 ```sh
 bun install
+bun run build
 bun test
 bun run typecheck
 bun run lint
@@ -21,7 +22,7 @@ herdr plugin action invoke wayfinder.companion.status
 herdr plugin action invoke wayfinder.companion.open
 ```
 
-`plugin link` does not run the manifest build. Install dependencies yourself before linking. `plugin unlink wayfinder.companion` unregisters the local checkout and leaves this directory alone.
+`plugin link` does not run the manifest build. Install dependencies and optionally build the binary before linking. `plugin unlink wayfinder.companion` unregisters the local checkout and leaves this directory alone.
 
 ## Install
 
@@ -31,7 +32,7 @@ From GitHub, once this repository is public:
 herdr plugin install <owner>/herdr-wayfinder-companion
 ```
 
-Install runs `bun install --frozen-lockfile`, then registers the plugin. Add the GitHub topic `herdr-plugin` to list it in the [marketplace](https://herdr.dev/plugins/).
+Install verifies required binaries (`gh`, `bun`), runs `bun install --frozen-lockfile`, compiles the standalone executable to `dist/wayfinder-companion`, and registers the plugin. Add the GitHub topic `herdr-plugin` to list it in the [marketplace](https://herdr.dev/plugins/).
 
 ## Actions
 
